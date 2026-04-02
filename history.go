@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -14,9 +15,13 @@ type Entry struct {
 	Timestamp time.Time
 }
 
-// Preview returns a display-safe truncated string.
+// Preview returns a display-safe truncated string (max 4 lines).
 func (e Entry) Preview() string {
-	s := e.Content
+	lines := strings.SplitN(e.Content, "\n", 5)
+	if len(lines) > 4 {
+		lines = append(lines[:4], "…")
+	}
+	s := strings.Join(lines, "\n")
 	if utf8.RuneCountInString(s) > previewMaxRunes {
 		runes := []rune(s)
 		return string(runes[:previewMaxRunes]) + "…"

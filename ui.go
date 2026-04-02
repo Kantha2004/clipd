@@ -2,14 +2,17 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"log"
 	"os/exec"
 	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"golang.design/x/clipboard"
 )
@@ -18,9 +21,10 @@ import (
 // passing all other keys to the underlying text entry.
 type navEntry struct {
 	widget.Entry
-	onUp    func()
-	onDown  func()
-	onEnter func()
+	onUp     func()
+	onDown   func()
+	onEnter  func()
+	onEscape func()
 }
 
 func newNavEntry() *navEntry {
@@ -43,6 +47,10 @@ func (e *navEntry) TypedKey(key *fyne.KeyEvent) {
 		if e.onEnter != nil {
 			e.onEnter()
 		}
+	case fyne.KeyEscape:
+		if e.onEscape != nil {
+			e.onEscape()
+		}
 	default:
 		e.Entry.TypedKey(key)
 	}
@@ -54,12 +62,14 @@ type UI struct {
 	store  *HistoryStore
 	window fyne.Window
 
-	search *navEntry
-	list   *widget.List
+	search   *navEntry
+	itemsBox *fyne.Container
+	scroll   *container.Scroll
 
-	filtered   []Entry
-	cursorIdx  int  // highlighted row index; -1 = none
-	navigating bool // true while programmatically calling list.Select (suppresses action)
+	filtered  []Entry
+	cursorIdx int // highlighted row index; -1 = none
+	itemBgs   []*canvas.Rectangle
+	itemTs    []*widget.Label
 
 	// showCh receives trigger events from the hotkey goroutine.
 	showCh chan string
@@ -72,6 +82,11 @@ func NewUI(a fyne.App, store *HistoryStore) *UI {
 	return u
 }
 
+var (
+	colorSelected = color.NRGBA{R: 65, G: 105, B: 225, A: 80}
+	colorDefault  = color.NRGBA{R: 0, G: 0, B: 0, A: 0}
+)
+
 func (u *UI) buildWindow() {
 	u.window = u.app.NewWindow("Clipboard History")
 	u.window.Resize(fyne.NewSize(620, 440))
@@ -79,39 +94,15 @@ func (u *UI) buildWindow() {
 	u.window.SetCloseIntercept(u.hidePicker)
 
 	u.search = newNavEntry()
-	u.search.SetPlaceHolder("Type to filter… (↑↓ navigate, Enter select, Esc close)")
+	u.search.SetPlaceHolder("Type to filter... (↑↓ navigate, Enter select, Esc close)")
 	u.search.OnChanged = func(q string) { u.applyFilter(q) }
 	u.search.onDown = func() { u.moveCursor(+1) }
 	u.search.onUp = func() { u.moveCursor(-1) }
 	u.search.onEnter = u.confirmCursor
+	u.search.onEscape = u.hidePicker
 
-	u.list = widget.NewList(
-		func() int { return len(u.filtered) },
-		func() fyne.CanvasObject {
-			preview := widget.NewLabel("")
-			preview.Wrapping = fyne.TextTruncate
-			ts := widget.NewLabel("")
-			ts.Importance = widget.LowImportance
-			ts.TextStyle = fyne.TextStyle{Italic: true}
-			return container.NewVBox(preview, ts)
-		},
-		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			if id >= len(u.filtered) {
-				return
-			}
-			e := u.filtered[id]
-			c := obj.(*fyne.Container)
-			c.Objects[0].(*widget.Label).SetText(e.Preview())
-			c.Objects[1].(*widget.Label).SetText(formatAge(e.Timestamp))
-		},
-	)
-	// Mouse click: select immediately.
-	u.list.OnSelected = func(id widget.ListItemID) {
-		if u.navigating || id >= len(u.filtered) {
-			return
-		}
-		u.selectEntry(u.filtered[id])
-	}
+	u.itemsBox = container.NewVBox()
+	u.scroll = container.NewVScroll(u.itemsBox)
 
 	u.window.Canvas().SetOnTypedKey(func(ev *fyne.KeyEvent) {
 		if ev.Name == fyne.KeyEscape {
@@ -122,9 +113,115 @@ func (u *UI) buildWindow() {
 	u.window.SetContent(container.NewBorder(
 		container.NewVBox(u.search, widget.NewSeparator()),
 		nil, nil, nil,
-		u.list,
+		u.scroll,
 	))
 }
+
+func (u *UI) buildItems() {
+	u.itemsBox.Objects = nil
+	u.itemBgs = nil
+	u.itemTs = nil
+
+	for i, e := range u.filtered {
+		entry := e
+		_ = i
+
+		preview := widget.NewLabel(entry.Preview())
+		ts := widget.NewLabel(formatAge(entry.Timestamp))
+		ts.Importance = widget.LowImportance
+		ts.TextStyle = fyne.TextStyle{Italic: true}
+
+		copyBtn := widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
+			u.copyOnly(entry)
+		})
+		copyBtn.Importance = widget.LowImportance
+
+		bg := canvas.NewRectangle(colorDefault)
+		u.itemBgs = append(u.itemBgs, bg)
+		u.itemTs = append(u.itemTs, ts)
+
+		textCol := container.NewVBox(preview, ts)
+		content := container.NewBorder(nil, nil, copyBtn, nil, textCol)
+		item := container.NewStack(bg, content)
+
+		tappable := newTappableContainer(item, bg, ts, func() {
+			u.selectEntry(entry)
+		})
+
+		u.itemsBox.Add(tappable)
+		u.itemsBox.Add(widget.NewSeparator())
+	}
+	u.itemsBox.Refresh()
+}
+
+var colorHover = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
+
+// tappableContainer wraps any CanvasObject to make it clickable and hoverable.
+type tappableContainer struct {
+	widget.BaseWidget
+	content  fyne.CanvasObject
+	bg       *canvas.Rectangle
+	ts       *widget.Label
+	onTapped func()
+}
+
+func newTappableContainer(content fyne.CanvasObject, bg *canvas.Rectangle, ts *widget.Label, onTapped func()) *tappableContainer {
+	t := &tappableContainer{content: content, bg: bg, ts: ts, onTapped: onTapped}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+func (t *tappableContainer) CreateRenderer() fyne.WidgetRenderer {
+	return &tappableRenderer{content: t.content}
+}
+
+func (t *tappableContainer) Tapped(_ *fyne.PointEvent) {
+	if t.onTapped != nil {
+		t.onTapped()
+	}
+}
+
+func (t *tappableContainer) MouseIn(_ *desktop.MouseEvent) {
+	if t.bg.FillColor != colorSelected {
+		t.bg.FillColor = colorHover
+		t.bg.Refresh()
+		t.ts.Importance = widget.MediumImportance
+		t.ts.Refresh()
+	}
+}
+
+func (t *tappableContainer) MouseMoved(_ *desktop.MouseEvent) {}
+
+func (t *tappableContainer) MouseOut() {
+	if t.bg.FillColor != colorSelected {
+		t.bg.FillColor = colorDefault
+		t.bg.Refresh()
+		t.ts.Importance = widget.LowImportance
+		t.ts.Refresh()
+	}
+}
+
+type tappableRenderer struct {
+	content fyne.CanvasObject
+}
+
+func (r *tappableRenderer) Layout(size fyne.Size) {
+	r.content.Resize(size)
+}
+
+func (r *tappableRenderer) MinSize() fyne.Size {
+	return r.content.MinSize()
+}
+
+func (r *tappableRenderer) Refresh() {
+	r.content.Refresh()
+}
+
+func (r *tappableRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.content}
+}
+
+func (r *tappableRenderer) Destroy() {}
 
 // moveCursor moves the highlighted row by delta (+1 down, -1 up).
 func (u *UI) moveCursor(delta int) {
@@ -138,11 +235,31 @@ func (u *UI) moveCursor(delta int) {
 	if next >= len(u.filtered) {
 		next = len(u.filtered) - 1
 	}
-	u.cursorIdx = next
-	u.navigating = true
-	u.list.Select(u.cursorIdx)
-	u.navigating = false
-	u.list.ScrollTo(u.cursorIdx)
+	u.setCursor(next)
+}
+
+func (u *UI) setCursor(idx int) {
+	// Clear previous highlight.
+	if u.cursorIdx >= 0 && u.cursorIdx < len(u.itemBgs) {
+		u.itemBgs[u.cursorIdx].FillColor = colorDefault
+		u.itemBgs[u.cursorIdx].Refresh()
+		u.itemTs[u.cursorIdx].Importance = widget.LowImportance
+		u.itemTs[u.cursorIdx].Refresh()
+	}
+	u.cursorIdx = idx
+	// Set new highlight.
+	if u.cursorIdx >= 0 && u.cursorIdx < len(u.itemBgs) {
+		u.itemBgs[u.cursorIdx].FillColor = colorSelected
+		u.itemBgs[u.cursorIdx].Refresh()
+		u.itemTs[u.cursorIdx].Importance = widget.MediumImportance
+		u.itemTs[u.cursorIdx].Refresh()
+
+		// Scroll to keep cursor visible. Each item is at index idx*2 (item + separator).
+		obj := u.itemsBox.Objects[idx*2]
+		pos := obj.Position()
+		u.scroll.Offset = fyne.NewPos(0, pos.Y)
+		u.scroll.Refresh()
+	}
 }
 
 // confirmCursor selects the currently highlighted row (Enter key).
@@ -183,15 +300,17 @@ func (u *UI) ShowPicker(prevWindowID string) {
 	}
 }
 
-// showPickerNow must only be called from the fyne main goroutine.
+// showPickerNow schedules the picker to open on the Fyne main thread.
 func (u *UI) showPickerNow(_ string) {
 	log.Println("showing picker window")
-	u.cursorIdx = -1
-	u.search.SetText("")
-	u.applyFilter("")
-	u.window.Show()
-	u.window.RequestFocus()
-	u.window.Canvas().Focus(u.search)
+	fyne.Do(func() {
+		u.cursorIdx = -1
+		u.search.SetText("")
+		u.applyFilter("")
+		u.window.Show()
+		u.window.RequestFocus()
+		u.window.Canvas().Focus(u.search)
+	})
 }
 
 func (u *UI) hidePicker() {
@@ -212,15 +331,27 @@ func (u *UI) applyFilter(query string) {
 		}
 		u.filtered = result
 	}
-	// Reset cursor to first item so Enter immediately works.
 	u.cursorIdx = -1
-	u.list.UnselectAll()
-	u.list.Refresh()
+	u.buildItems()
 }
 
 func (u *UI) selectEntry(e Entry) {
 	u.hidePicker()
 	go u.simulatePaste(e.Content)
+}
+
+// copyOnly writes content to the clipboard without pasting.
+func (u *UI) copyOnly(e Entry) {
+	u.hidePicker()
+	go func() {
+		cmd := exec.Command("wl-copy")
+		cmd.Stdin = strings.NewReader(e.Content)
+		if err := cmd.Run(); err != nil {
+			log.Printf("copy: wl-copy failed (%v), falling back to X11 clipboard", err)
+			clipboard.Write(clipboard.FmtText, []byte(e.Content))
+		}
+		log.Println("copy: item copied to clipboard (no paste)")
+	}()
 }
 
 // simulatePaste writes content to the Wayland clipboard, then tries to send
@@ -245,24 +376,32 @@ func (u *UI) simulatePaste(content string) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Try ydotool first (uinput-level, works everywhere on Wayland).
-	if out, err := exec.Command("ydotool", "key", "ctrl+v").CombinedOutput(); err == nil {
-		log.Println("paste: Ctrl+V sent via ydotool")
+	// Send both Ctrl+Shift+V (terminals) and Ctrl+V (other apps).
+	// Non-terminal apps ignore Ctrl+Shift+V; terminals ignore Ctrl+V.
+	if out, err := exec.Command("ydotool", "key", "ctrl+shift+v").CombinedOutput(); err == nil {
+		time.Sleep(50 * time.Millisecond)
+		exec.Command("ydotool", "key", "ctrl+v").Run()
+		log.Println("paste: Ctrl+Shift+V and Ctrl+V sent via ydotool")
 		return
 	} else {
 		log.Printf("paste: ydotool unavailable (%v: %s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// Fall back to xdotool (works for XWayland apps on GNOME Wayland).
-	if out, err := exec.Command("xdotool", "key", "ctrl+v").CombinedOutput(); err == nil {
-		log.Println("paste: Ctrl+V sent via xdotool")
+	if out, err := exec.Command("xdotool", "key", "ctrl+shift+v").CombinedOutput(); err == nil {
+		time.Sleep(50 * time.Millisecond)
+		exec.Command("xdotool", "key", "ctrl+v").Run()
+		log.Println("paste: Ctrl+Shift+V and Ctrl+V sent via xdotool")
 		return
 	} else {
 		log.Printf("paste: xdotool failed (%v: %s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// Fall back to wtype (works on wlroots compositors like Sway).
-	if out, err := exec.Command("wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl").CombinedOutput(); err == nil {
-		log.Println("paste: Ctrl+V sent via wtype")
+	if out, err := exec.Command("wtype", "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl").CombinedOutput(); err == nil {
+		time.Sleep(50 * time.Millisecond)
+		exec.Command("wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl").Run()
+		log.Println("paste: Ctrl+Shift+V and Ctrl+V sent via wtype")
 		return
 	} else {
 		log.Printf("paste: wtype failed (%v: %s)", err, strings.TrimSpace(string(out)))
@@ -276,10 +415,6 @@ func (u *UI) simulatePaste(content string) {
 // Run starts the fyne event loop (blocks until the app quits).
 // It also drains the showCh channel so window operations happen on the main thread.
 func (u *UI) Run() {
-	// Poll showCh every 50 ms from a goroutine, but call window operations
-	// via widget.NewLabel trick to hop onto fyne's internal main thread.
-	// On Linux/GLFW, window.Show() is internally dispatched to the main
-	// thread, so calling it from this goroutine is safe.
 	go func() {
 		for prevWin := range u.showCh {
 			u.showPickerNow(prevWin)

@@ -122,6 +122,7 @@ func runDaemon() {
 	store := NewHistoryStore(24*time.Hour, 200)
 
 	a := app.NewWithID("io.github.clipd")
+	a.Settings().SetTheme(clipTheme{})
 	ui := NewUI(a, store)
 
 	ctx, cancel := context.WithCancel(context.Background())
