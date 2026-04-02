@@ -1,0 +1,13 @@
+[Unit]
+Description=ydotool daemon (user instance)
+Documentation=man:ydotoold(8)
+After=graphical-session.target
+
+[Service]
+ExecStartPre=/bin/rm -f /tmp/.ydotool_socket
+ExecStart=/usr/bin/ydotoold
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

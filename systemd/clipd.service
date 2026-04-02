@@ -1,0 +1,13 @@
+[Unit]
+Description=clipd - Clipboard History Manager
+After=graphical-session.target ydotoold.service
+Wants=ydotoold.service
+
+[Service]
+ExecStart=%h/.local/bin/clipd
+Restart=on-failure
+RestartSec=5
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=graphical-session.target
