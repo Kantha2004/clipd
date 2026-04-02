@@ -185,3 +185,7 @@ pgrep -x clipd >/dev/null || /full/path/to/clipd &
 ## License
 
 MIT
+
+---
+
+<a target="_blank" href="https://www.svgrepo.com/svg/257864/clipboard-tasks">Clipboard</a> icon by <a target="_blank" href="https://www.svgrepo.com">SVG Repo</a>

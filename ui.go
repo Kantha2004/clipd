@@ -280,6 +280,7 @@ func (u *UI) setupSystray() {
 	keep.Show()
 
 	if desk, ok := u.app.(desktop.App); ok {
+		desk.SetSystemTrayIcon(resourceIconSvg)
 		desk.SetSystemTrayMenu(fyne.NewMenu("Clipboard Manager",
 			fyne.NewMenuItem("Open History", func() { u.ShowPicker("") }),
 			fyne.NewMenuItemSeparator(),
