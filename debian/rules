@@ -1,6 +1,8 @@
 #!/usr/bin/make -f
 export DH_VERBOSE = 1
-export GOFLAGS = -mod=vendor
+export GOFLAGS  = -mod=vendor
+export GOPATH   = /tmp/go
+export GOCACHE  = /tmp/go-cache
 
 %:
 	dh $@
