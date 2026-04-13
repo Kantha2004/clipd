@@ -25,10 +25,13 @@ jobs:
           sudo apt-get install -y \
             build-essential golang-any \
             devscripts debhelper dput fakeroot \
-            libgl1-mesa-dev xorg-dev libx11-dev
+            libgl-dev libx11-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxi-dev libxxf86vm-dev
 
       # Handles gpg-agent setup for non-interactive signing in CI.
       - name: Import GPG signing key
+        id: import-gpg
         uses: crazy-max/ghaction-import-gpg@v6
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -49,7 +52,7 @@ jobs:
 
       - name: Build signed source package
         env:
-          DEBSIGN_KEYID: ${{ secrets.GPG_KEY_ID }}
+          DEBSIGN_KEYID: ${{ steps.import-gpg.outputs.fingerprint }}
         run: make source VERSION=${{ steps.version.outputs.VERSION }}
 
       - name: Upload to Launchpad PPA

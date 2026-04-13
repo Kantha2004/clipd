@@ -4,9 +4,13 @@ Priority: optional
 Maintainer: kantha2004 <kumarkantha41@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                golang-any,
-               libgl1-mesa-dev,
-               xorg-dev,
-               libx11-dev
+               libgl-dev,
+               libx11-dev,
+               libxrandr-dev,
+               libxinerama-dev,
+               libxcursor-dev,
+               libxi-dev,
+               libxxf86vm-dev
 Standards-Version: 4.6.0
 Homepage: https://github.com/kantha2004/clipd
 
