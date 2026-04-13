@@ -1,7 +1,7 @@
 Source: clipd
 Section: utils
 Priority: optional
-Maintainer: kantha2004 <your-launchpad-email@example.com>
+Maintainer: kantha2004 <kumarkantha41@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                golang-any,
                libgl1-mesa-dev,
