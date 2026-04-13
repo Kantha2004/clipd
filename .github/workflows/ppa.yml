@@ -1,0 +1,50 @@
+name: PPA Upload
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  ppa:
+    name: Upload source package to Launchpad PPA
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            devscripts debhelper dput fakeroot \
+            libgl1-mesa-dev xorg-dev libx11-dev
+
+      # Handles gpg-agent setup for non-interactive signing in CI.
+      - name: Import GPG signing key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version into debian/changelog
+        run: |
+          sed -i "1s/([^)]*)/(${{ steps.version.outputs.VERSION }}-1)/" \
+            debian/changelog
+
+      - name: Build signed source package
+        env:
+          DEBSIGN_KEYID: ${{ secrets.GPG_KEY_ID }}
+        run: make source VERSION=${{ steps.version.outputs.VERSION }}
+
+      - name: Upload to Launchpad PPA
+        run: make ppa VERSION=${{ steps.version.outputs.VERSION }}

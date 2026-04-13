@@ -1,0 +1,19 @@
+Source: clipd
+Section: utils
+Priority: optional
+Maintainer: kantha2004 <kumarkantha41@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               golang-any,
+               libgl1-mesa-dev,
+               xorg-dev,
+               libx11-dev
+Standards-Version: 4.6.0
+Homepage: https://github.com/kantha2004/clipd
+
+Package: clipd
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: wl-clipboard, ydotool | xdotool
+Description: Clipboard history manager for Wayland/X11
+ A keyboard-driven clipboard history daemon with a system-tray picker.
+ Supports Wayland (wl-copy, ydotool) and X11 (xdotool).
