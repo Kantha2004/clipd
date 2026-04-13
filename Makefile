@@ -62,8 +62,12 @@ vendor:
 # Build a signed source package for upload to Launchpad PPA.
 # Requires: devscripts, debhelper, gpg key matching debian/changelog maintainer.
 source: vendor
-	tar --exclude=.git --exclude=bin -czf ../clipd_$(VERSION).orig.tar.gz .
-	debuild -S -sa
+	# Create the .orig.tar.gz, excluding git, bin, and debian/ (standard for 3.0 quilt).
+	# We include vendor/ so the source package is self-contained.
+	tar --exclude=.git --exclude=bin --exclude=debian -czf ../clipd_$(VERSION).orig.tar.gz .
+	# -i: ignore changes in .git and other repo metadata in the diff.
+	# -I: ignore .git and other repo metadata when building the tarball.
+	debuild -S -sa -i -I
 
 # Upload the signed source package to Launchpad.
 # Run 'make source' first, then 'make ppa'.
@@ -72,4 +76,3 @@ ppa:
 
 clean:
 	rm -rf $(BINDIR)
-	rm -rf vendor
