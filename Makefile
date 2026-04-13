@@ -2,7 +2,7 @@ BINDIR     := bin
 INSTALLDIR := $(HOME)/.local/bin
 SERVICEDIR := $(HOME)/.config/systemd/user
 
-VERSION    := beta-1.0.0
+VERSION    := $(shell dpkg-parsechangelog -S Version | cut -d- -f1)
 ARCH       := $(shell dpkg --print-architecture)
 PKGNAME    := clipd_$(VERSION)_$(ARCH)
 PKGDIR     := $(BINDIR)/deb/$(PKGNAME)
@@ -45,7 +45,7 @@ deb: build
 	sed 's|%h/.local/bin/clipd|/usr/local/bin/clipd|' \
 		systemd/clipd.service > $(PKGDIR)/usr/lib/systemd/user/clipd.service
 	cp systemd/ydotoold.service $(PKGDIR)/usr/lib/systemd/user/ydotoold.service
-	sed 's/VERSION/$(VERSION)/; s/ARCH/$(ARCH)/' \
+	sed "s/VERSION/$(VERSION)/; s/ARCH/$(ARCH)/" \
 		packaging/DEBIAN/control > $(PKGDIR)/DEBIAN/control
 	install -m 755 packaging/DEBIAN/postinst $(PKGDIR)/DEBIAN/postinst
 	install -m 755 packaging/DEBIAN/prerm    $(PKGDIR)/DEBIAN/prerm
@@ -62,6 +62,7 @@ vendor:
 # Build a signed source package for upload to Launchpad PPA.
 # Requires: devscripts, debhelper, gpg key matching debian/changelog maintainer.
 source: vendor
+	tar --exclude=.git --exclude=bin -czf ../clipd_$(VERSION).orig.tar.gz .
 	debuild -S -sa
 
 # Upload the signed source package to Launchpad.
