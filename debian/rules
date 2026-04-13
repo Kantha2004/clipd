@@ -14,8 +14,8 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	install -Dm755 bin/clipd \
-		$(CURDIR)/debian/clipd/usr/local/bin/clipd
-	sed 's|%h/.local/bin/clipd|/usr/local/bin/clipd|' \
+		$(CURDIR)/debian/clipd/usr/bin/clipd
+	sed 's|%h/.local/bin/clipd|/usr/bin/clipd|' \
 		systemd/clipd.service \
 		| install -Dm644 /dev/stdin \
 		$(CURDIR)/debian/clipd/usr/lib/systemd/user/clipd.service
