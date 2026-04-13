@@ -14,19 +14,19 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	install -Dm755 bin/clipd \
-		$(DESTDIR)/usr/local/bin/clipd
+		$(CURDIR)/debian/clipd/usr/local/bin/clipd
 	sed 's|%h/.local/bin/clipd|/usr/local/bin/clipd|' \
 		systemd/clipd.service \
 		| install -Dm644 /dev/stdin \
-		$(DESTDIR)/usr/lib/systemd/user/clipd.service
+		$(CURDIR)/debian/clipd/usr/lib/systemd/user/clipd.service
 	install -Dm644 systemd/ydotoold.service \
-		$(DESTDIR)/usr/lib/systemd/user/ydotoold.service
+		$(CURDIR)/debian/clipd/usr/lib/systemd/user/ydotoold.service
 	install -Dm755 packaging/setup-shortcut \
-		$(DESTDIR)/usr/lib/clipd/setup-shortcut
+		$(CURDIR)/debian/clipd/usr/lib/clipd/setup-shortcut
 	install -Dm755 packaging/teardown-shortcut \
-		$(DESTDIR)/usr/lib/clipd/teardown-shortcut
+		$(CURDIR)/debian/clipd/usr/lib/clipd/teardown-shortcut
 	install -Dm644 packaging/clipd-shortcut-setup.desktop \
-		$(DESTDIR)/etc/xdg/autostart/clipd-shortcut-setup.desktop
+		$(CURDIR)/debian/clipd/etc/xdg/autostart/clipd-shortcut-setup.desktop
 
 override_dh_auto_test:
 	# no tests
