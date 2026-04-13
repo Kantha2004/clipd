@@ -1,13 +1,15 @@
 #!/usr/bin/make -f
-export DH_VERBOSE = 1
-export GOFLAGS  = -mod=vendor
-export GOPATH   = /tmp/go
-export GOCACHE  = /tmp/go-cache
+export DH_VERBOSE   = 1
+export GOFLAGS      = -mod=vendor
+export GOPATH       = /tmp/go
+export GOCACHE      = /tmp/go-cache
+export GOTOOLCHAIN  = local
 
 %:
 	dh $@
 
 override_dh_auto_build:
+	mkdir -p bin
 	go build -trimpath -ldflags="-s -w" -o bin/clipd .
 
 override_dh_auto_install:
