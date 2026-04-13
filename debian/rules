@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+export GOFLAGS = -mod=vendor
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	go build -trimpath -ldflags="-s -w" -o bin/clipd .
+
+override_dh_auto_install:
+	install -Dm755 bin/clipd \
+		$(DESTDIR)/usr/local/bin/clipd
+	sed 's|%h/.local/bin/clipd|/usr/local/bin/clipd|' \
+		systemd/clipd.service \
+		| install -Dm644 /dev/stdin \
+		$(DESTDIR)/usr/lib/systemd/user/clipd.service
+	install -Dm644 systemd/ydotoold.service \
+		$(DESTDIR)/usr/lib/systemd/user/ydotoold.service
+
+override_dh_auto_test:
+	# no tests

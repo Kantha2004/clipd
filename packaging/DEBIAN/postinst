@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+echo ""
+echo "clipd installed to /usr/local/bin/clipd"
+echo "Systemd user services installed to /usr/lib/systemd/user/"
+echo ""
+echo "To start clipd for your user, run:"
+echo "  systemctl --user daemon-reload"
+echo "  systemctl --user enable --now clipd"
+echo ""
+echo "Then bind a key in your DE to open the picker:"
+echo "  /usr/local/bin/clipd -trigger"
+echo ""

@@ -1,0 +1,9 @@
+Package: clipd
+Version: VERSION
+Architecture: ARCH
+Maintainer: kantha2004
+Description: Clipboard history manager for Wayland/X11
+ A keyboard-driven clipboard history daemon with a system-tray picker.
+ Supports Wayland (wl-copy, ydotool) and X11 (xdotool).
+Depends: libc6, libgl1, libx11-6, libbsd0, libxcb1
+Recommends: wl-clipboard, ydotool | xdotool
