@@ -23,21 +23,20 @@ Download the latest `clipd_*_amd64.deb` from the [Releases](../../releases) page
 
 ```bash
 sudo dpkg -i clipd_*_amd64.deb
-
-# Enable for your user
-systemctl --user daemon-reload
-systemctl --user enable --now clipd
 ```
+
+The installer automatically:
+- Enables and starts the `clipd` systemd user service
+- Registers **Super+V** as the keyboard shortcut (GNOME only)
 
 ### Option B — PPA
 
 ```bash
 sudo add-apt-repository ppa:kantha2004/clipd
 sudo apt install clipd
-
-systemctl --user daemon-reload
-systemctl --user enable --now clipd
 ```
+
+Same automatic setup as Option A.
 
 ### Option C — Build from source
 
@@ -50,7 +49,7 @@ sudo apt install libgl1-mesa-dev xorg-dev libx11-dev
 ```bash
 git clone https://github.com/kantha2004/clipd
 cd clipd
-make enable        # build + install to ~/.local/bin + enable systemd services
+make enable        # build + install to ~/.local/bin + enable systemd services + register shortcut
 ```
 
 ---
@@ -71,17 +70,13 @@ sudo apt install wtype              # for wlroots compositors (Sway, Hyprland)
 
 ## Usage
 
-### Bind a keyboard shortcut
+### Keyboard shortcut
 
-Bind your chosen key to `clipd -trigger` in your DE:
+On **GNOME**, the **Super+V** shortcut is registered automatically during installation.
 
-**GNOME** — Settings → Keyboard → Custom Shortcuts:
-```
-Name:    Clipboard History
-Command: clipd -trigger
-```
+For other desktop environments, bind your chosen key to `clipd -trigger` manually:
 
-**i3 / Sway:**
+**i3 / Sway** — add to your config file:
 ```
 bindsym $mod+v exec clipd -trigger
 ```
@@ -109,7 +104,7 @@ bindsym $mod+v exec clipd -trigger
 |---|---|
 | `make build` | Compile binary to `bin/clipd` |
 | `make install` | Install to `~/.local/bin` and install systemd services |
-| `make enable` | Install + enable and start systemd services |
+| `make enable` | Install + enable and start systemd services + register GNOME shortcut |
 | `make uninstall` | Disable services and remove installed files |
 | `make deb` | Build a `.deb` package in `bin/` |
 | `make deb VERSION=1.2.0` | Build `.deb` with a specific version |
