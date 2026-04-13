@@ -7,7 +7,7 @@ VERSION 	:= $(shell dpkg-parsechangelog -S Version 2>/dev/null | cut -d- -f1)
 VERSION 	:= $(strip $(VERSION))
 
 ifeq ($(VERSION),)
-VERSION 	:= $(shell sed -n 's/^clipd (\(.*\)-.*)/\1/p' debian/changelog | head -n1)
+VERSION 	:= $(shell sed -n 's/^clipd (\(.*\)-.*).*$$/\1/p' debian/changelog | head -n1)
 endif
 
 ifeq ($(VERSION),)
