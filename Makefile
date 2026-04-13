@@ -1,14 +1,27 @@
-BINDIR     := bin
-INSTALLDIR := $(HOME)/.local/bin
-LIBDIR     := $(HOME)/.local/lib/clipd
-SERVICEDIR := $(HOME)/.config/systemd/user
+BINDIR     	:= bin
+INSTALLDIR 	:= $(HOME)/.local/bin
+LIBDIR     	:= $(HOME)/.local/lib/clipd
+SERVICEDIR 	:= $(HOME)/.config/systemd/user
 
-VERSION    := $(shell dpkg-parsechangelog -S Version 2>/dev/null | cut -d- -f1)
-VERSION    := $(or $(VERSION),$(shell grep -m1 '^clipd (' debian/changelog | sed 's/clipd (\([^-]*\).*/\1/'))
-ARCH       := $(shell dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-PKGNAME    := clipd_$(VERSION)_$(ARCH)
-PKGDIR     := $(BINDIR)/deb/$(PKGNAME)
-PPA        := ppa:kantha2004/clipd
+VERSION 	:= $(shell dpkg-parsechangelog -S Version 2>/dev/null | cut -d- -f1)
+VERSION 	:= $(strip $(VERSION))
+
+ifeq ($(VERSION),)
+VERSION 	:= $(shell sed -n 's/^clipd (\(.*\)-.*)/\1/p' debian/changelog | head -n1)
+endif
+
+ifeq ($(VERSION),)
+VERSION 	:= 0.1.0
+endif
+
+ARCH 		:= $(shell dpkg --print-architecture 2>/dev/null)
+ifeq ($(ARCH),)
+ARCH 		:= $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+endif
+
+PKGNAME 	:= clipd_$(VERSION)_$(ARCH)
+PKGDIR  	:= $(BINDIR)/deb/$(PKGNAME)
+PPA     	:= ppa:kantha2004/clipd
 
 .PHONY: build install install-services enable uninstall deb vendor source ppa clean
 
