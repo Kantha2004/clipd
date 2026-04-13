@@ -4,6 +4,7 @@ Priority: optional
 Maintainer: kanthakumar <kumarkantha41@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                golang-any,
+               pkg-config,
                libgl-dev,
                libx11-dev,
                libxrandr-dev,
