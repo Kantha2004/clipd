@@ -1,7 +1,7 @@
 Source: clipd
 Section: utils
 Priority: optional
-Maintainer: kantha2004 <kumarkantha41@gmail.com>
+Maintainer: kanthakumar <kumarkantha41@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                golang-any,
                libgl-dev,
