@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=clipd shortcut setup
+Comment=Register the clipd keyboard shortcut on first login
+Exec=/usr/lib/clipd/setup-shortcut
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

@@ -1,5 +1,6 @@
 BINDIR     := bin
 INSTALLDIR := $(HOME)/.local/bin
+LIBDIR     := $(HOME)/.local/lib/clipd
 SERVICEDIR := $(HOME)/.config/systemd/user
 
 VERSION    := $(shell dpkg-parsechangelog -S Version | cut -d- -f1)
@@ -15,8 +16,10 @@ build:
 	go build -o $(BINDIR)/clipd .
 
 install: build install-services
-	mkdir -p $(INSTALLDIR)
+	mkdir -p $(INSTALLDIR) $(LIBDIR)
 	cp $(BINDIR)/clipd $(INSTALLDIR)/clipd
+	install -m 755 packaging/setup-shortcut    $(LIBDIR)/setup-shortcut
+	install -m 755 packaging/teardown-shortcut $(LIBDIR)/teardown-shortcut
 
 install-services:
 	mkdir -p $(SERVICEDIR)
@@ -28,23 +31,31 @@ install-services:
 enable: install
 	systemctl --user enable --now ydotoold
 	systemctl --user enable --now clipd
+	@$(LIBDIR)/setup-shortcut $(INSTALLDIR)/clipd || true
 
 uninstall:
 	systemctl --user disable --now clipd 2>/dev/null || true
 	systemctl --user disable --now ydotoold 2>/dev/null || true
 	rm -f $(SERVICEDIR)/clipd.service $(SERVICEDIR)/ydotoold.service
+	-$(LIBDIR)/teardown-shortcut
 	rm -f $(INSTALLDIR)/clipd
+	rm -rf $(LIBDIR)
 	systemctl --user daemon-reload
 
 deb: build
 	rm -rf $(PKGDIR)
 	mkdir -p $(PKGDIR)/usr/local/bin
 	mkdir -p $(PKGDIR)/usr/lib/systemd/user
+	mkdir -p $(PKGDIR)/usr/lib/clipd
+	mkdir -p $(PKGDIR)/etc/xdg/autostart
 	mkdir -p $(PKGDIR)/DEBIAN
 	cp $(BINDIR)/clipd $(PKGDIR)/usr/local/bin/clipd
 	sed 's|%h/.local/bin/clipd|/usr/local/bin/clipd|' \
 		systemd/clipd.service > $(PKGDIR)/usr/lib/systemd/user/clipd.service
 	cp systemd/ydotoold.service $(PKGDIR)/usr/lib/systemd/user/ydotoold.service
+	install -m 755 packaging/setup-shortcut    $(PKGDIR)/usr/lib/clipd/setup-shortcut
+	install -m 755 packaging/teardown-shortcut $(PKGDIR)/usr/lib/clipd/teardown-shortcut
+	cp packaging/clipd-shortcut-setup.desktop  $(PKGDIR)/etc/xdg/autostart/clipd-shortcut-setup.desktop
 	sed "s/VERSION/$(VERSION)/; s/ARCH/$(ARCH)/" \
 		packaging/DEBIAN/control > $(PKGDIR)/DEBIAN/control
 	install -m 755 packaging/DEBIAN/postinst $(PKGDIR)/DEBIAN/postinst

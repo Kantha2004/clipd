@@ -17,6 +17,12 @@ override_dh_auto_install:
 		$(DESTDIR)/usr/lib/systemd/user/clipd.service
 	install -Dm644 systemd/ydotoold.service \
 		$(DESTDIR)/usr/lib/systemd/user/ydotoold.service
+	install -Dm755 packaging/setup-shortcut \
+		$(DESTDIR)/usr/lib/clipd/setup-shortcut
+	install -Dm755 packaging/teardown-shortcut \
+		$(DESTDIR)/usr/lib/clipd/teardown-shortcut
+	install -Dm644 packaging/clipd-shortcut-setup.desktop \
+		$(DESTDIR)/etc/xdg/autostart/clipd-shortcut-setup.desktop
 
 override_dh_auto_test:
 	# no tests

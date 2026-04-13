@@ -1,0 +1,54 @@
+#!/bin/sh
+# Registers the clipd keyboard shortcut in GNOME (Super+V → clipd -trigger).
+# Idempotent — exits cleanly if already configured or if not running on GNOME.
+
+command -v gsettings >/dev/null 2>&1 || exit 0
+command -v python3   >/dev/null 2>&1 || exit 0
+
+SCHEMA="org.gnome.settings-daemon.plugins.media-keys"
+KB_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/clipd/"
+KB_SCHEMA="${SCHEMA}.custom-keybinding:${KB_PATH}"
+
+# Confirm the GNOME schema is available (skips KDE, i3, etc.)
+gsettings get "$SCHEMA" custom-keybindings >/dev/null 2>&1 || exit 0
+
+# Append to the custom-keybindings list (python3 handles GVariant parsing safely)
+python3 - "$SCHEMA" "$KB_PATH" << 'EOF'
+import sys, subprocess, ast, re
+schema, path = sys.argv[1], sys.argv[2]
+r = subprocess.run(['gsettings', 'get', schema, 'custom-keybindings'],
+                   capture_output=True, text=True)
+if r.returncode != 0:
+    sys.exit(0)
+val = re.sub(r'^@as ', '', r.stdout.strip())
+try:
+    lst = ast.literal_eval(val)
+except Exception:
+    lst = []
+if path in lst:
+    sys.exit(0)   # already registered
+lst.append(path)
+new_val = "['" + "', '".join(lst) + "']"
+subprocess.run(['gsettings', 'set', schema, 'custom-keybindings', new_val], check=True)
+EOF
+
+[ $? -eq 0 ] || exit 0
+
+# Use the full path so GNOME's shortcut runner can find the binary
+# regardless of whether ~/.local/bin is in the session PATH.
+# Accept an explicit path as $1 (e.g. from make), else fall back to PATH lookup.
+if [ -n "$1" ] && [ -x "$1" ]; then
+    CLIPD_BIN="$1"
+else
+    CLIPD_BIN=$(command -v clipd 2>/dev/null)
+fi
+if [ -z "$CLIPD_BIN" ]; then
+    echo "clipd: binary not found, skipping shortcut setup"
+    exit 0
+fi
+
+gsettings set "$KB_SCHEMA" name    'Clipboard History'
+gsettings set "$KB_SCHEMA" command "$CLIPD_BIN -trigger"
+gsettings set "$KB_SCHEMA" binding '<Super>v'
+
+echo "clipd: GNOME shortcut set — Super+V opens the picker"

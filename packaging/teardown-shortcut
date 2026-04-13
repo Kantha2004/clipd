@@ -1,0 +1,31 @@
+#!/bin/sh
+# Removes the clipd keyboard shortcut from GNOME.
+# Idempotent — exits cleanly if not registered or if not running on GNOME.
+
+command -v gsettings >/dev/null 2>&1 || exit 0
+command -v python3   >/dev/null 2>&1 || exit 0
+
+SCHEMA="org.gnome.settings-daemon.plugins.media-keys"
+KB_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/clipd/"
+
+gsettings get "$SCHEMA" custom-keybindings >/dev/null 2>&1 || exit 0
+
+python3 - "$SCHEMA" "$KB_PATH" << 'EOF'
+import sys, subprocess, ast, re
+schema, path = sys.argv[1], sys.argv[2]
+r = subprocess.run(['gsettings', 'get', schema, 'custom-keybindings'],
+                   capture_output=True, text=True)
+if r.returncode != 0:
+    sys.exit(0)
+val = re.sub(r'^@as ', '', r.stdout.strip())
+try:
+    lst = ast.literal_eval(val)
+except Exception:
+    sys.exit(0)
+if path not in lst:
+    sys.exit(0)   # not registered, nothing to do
+lst.remove(path)
+new_val = "['" + "', '".join(lst) + "']" if lst else "@as []"
+subprocess.run(['gsettings', 'set', schema, 'custom-keybindings', new_val], check=True)
+print("clipd: GNOME shortcut removed")
+EOF
