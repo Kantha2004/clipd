@@ -3,8 +3,9 @@ INSTALLDIR := $(HOME)/.local/bin
 LIBDIR     := $(HOME)/.local/lib/clipd
 SERVICEDIR := $(HOME)/.config/systemd/user
 
-VERSION    := $(shell dpkg-parsechangelog -S Version | cut -d- -f1)
-ARCH       := $(shell dpkg --print-architecture)
+VERSION    := $(shell dpkg-parsechangelog -S Version 2>/dev/null | cut -d- -f1)
+VERSION    := $(or $(VERSION),$(shell grep -m1 '^clipd (' debian/changelog | sed 's/clipd (\([^-]*\).*/\1/'))
+ARCH       := $(shell dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 PKGNAME    := clipd_$(VERSION)_$(ARCH)
 PKGDIR     := $(BINDIR)/deb/$(PKGNAME)
 PPA        := ppa:kantha2004/clipd
@@ -58,8 +59,8 @@ deb: build
 	cp packaging/clipd-shortcut-setup.desktop  $(PKGDIR)/etc/xdg/autostart/clipd-shortcut-setup.desktop
 	sed "s/VERSION/$(VERSION)/; s/ARCH/$(ARCH)/" \
 		packaging/DEBIAN/control > $(PKGDIR)/DEBIAN/control
-	install -m 755 packaging/DEBIAN/postinst $(PKGDIR)/DEBIAN/postinst
-	install -m 755 packaging/DEBIAN/prerm    $(PKGDIR)/DEBIAN/prerm
+	install -m 755 debian/postinst $(PKGDIR)/DEBIAN/postinst
+	install -m 755 debian/prerm    $(PKGDIR)/DEBIAN/prerm
 	fakeroot dpkg-deb --build $(PKGDIR) $(BINDIR)/$(PKGNAME).deb
 	@echo ""
 	@echo "Built: $(BINDIR)/$(PKGNAME).deb"

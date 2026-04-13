@@ -7,7 +7,6 @@ Wants=ydotoold.service
 ExecStart=%h/.local/bin/clipd
 Restart=on-failure
 RestartSec=5
-Environment=DISPLAY=:0
 
 [Install]
 WantedBy=graphical-session.target
