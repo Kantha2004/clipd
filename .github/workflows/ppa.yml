@@ -23,6 +23,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
+            build-essential golang-any \
             devscripts debhelper dput fakeroot \
             libgl1-mesa-dev xorg-dev libx11-dev
 
