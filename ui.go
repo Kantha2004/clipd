@@ -17,45 +17,6 @@ import (
 	"golang.design/x/clipboard"
 )
 
-// navEntry is a search box that routes ↑ ↓ Enter to the list while still
-// passing all other keys to the underlying text entry.
-type navEntry struct {
-	widget.Entry
-	onUp     func()
-	onDown   func()
-	onEnter  func()
-	onEscape func()
-}
-
-func newNavEntry() *navEntry {
-	e := &navEntry{}
-	e.ExtendBaseWidget(e)
-	return e
-}
-
-func (e *navEntry) TypedKey(key *fyne.KeyEvent) {
-	switch key.Name {
-	case fyne.KeyUp:
-		if e.onUp != nil {
-			e.onUp()
-		}
-	case fyne.KeyDown:
-		if e.onDown != nil {
-			e.onDown()
-		}
-	case fyne.KeyReturn, fyne.KeyEnter:
-		if e.onEnter != nil {
-			e.onEnter()
-		}
-	case fyne.KeyEscape:
-		if e.onEscape != nil {
-			e.onEscape()
-		}
-	default:
-		e.Entry.TypedKey(key)
-	}
-}
-
 // UI owns the picker window and the system tray entry.
 type UI struct {
 	app    fyne.App
@@ -72,7 +33,8 @@ type UI struct {
 	itemTs    []*widget.Label
 
 	// showCh receives trigger events from the hotkey goroutine.
-	showCh chan string
+	showCh    chan string
+	prevWinID string // window that was active when the picker was opened
 }
 
 func NewUI(a fyne.App, store *HistoryStore) *UI {
@@ -99,6 +61,7 @@ func (u *UI) buildWindow() {
 	u.search.onDown = func() { u.moveCursor(+1) }
 	u.search.onUp = func() { u.moveCursor(-1) }
 	u.search.onEnter = u.confirmCursor
+	u.search.onShiftEnter = u.confirmCursorShift
 	u.search.onEscape = u.hidePicker
 
 	u.itemsBox = container.NewVBox()
@@ -122,9 +85,8 @@ func (u *UI) buildItems() {
 	u.itemBgs = nil
 	u.itemTs = nil
 
-	for i, e := range u.filtered {
+	for _, e := range u.filtered {
 		entry := e
-		_ = i
 
 		preview := widget.NewLabel(entry.Preview())
 		ts := widget.NewLabel(formatAge(entry.Timestamp))
@@ -144,8 +106,8 @@ func (u *UI) buildItems() {
 		content := container.NewBorder(nil, nil, copyBtn, nil, textCol)
 		item := container.NewStack(bg, content)
 
-		tappable := newTappableContainer(item, bg, ts, func() {
-			u.selectEntry(entry)
+		tappable := newTappableContainer(item, bg, ts, func(shiftHeld bool) {
+			u.selectEntry(entry, shiftHeld)
 		})
 
 		u.itemsBox.Add(tappable)
@@ -153,75 +115,6 @@ func (u *UI) buildItems() {
 	}
 	u.itemsBox.Refresh()
 }
-
-var colorHover = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
-
-// tappableContainer wraps any CanvasObject to make it clickable and hoverable.
-type tappableContainer struct {
-	widget.BaseWidget
-	content  fyne.CanvasObject
-	bg       *canvas.Rectangle
-	ts       *widget.Label
-	onTapped func()
-}
-
-func newTappableContainer(content fyne.CanvasObject, bg *canvas.Rectangle, ts *widget.Label, onTapped func()) *tappableContainer {
-	t := &tappableContainer{content: content, bg: bg, ts: ts, onTapped: onTapped}
-	t.ExtendBaseWidget(t)
-	return t
-}
-
-func (t *tappableContainer) CreateRenderer() fyne.WidgetRenderer {
-	return &tappableRenderer{content: t.content}
-}
-
-func (t *tappableContainer) Tapped(_ *fyne.PointEvent) {
-	if t.onTapped != nil {
-		t.onTapped()
-	}
-}
-
-func (t *tappableContainer) MouseIn(_ *desktop.MouseEvent) {
-	if t.bg.FillColor != colorSelected {
-		t.bg.FillColor = colorHover
-		t.bg.Refresh()
-		t.ts.Importance = widget.MediumImportance
-		t.ts.Refresh()
-	}
-}
-
-func (t *tappableContainer) MouseMoved(_ *desktop.MouseEvent) {}
-
-func (t *tappableContainer) MouseOut() {
-	if t.bg.FillColor != colorSelected {
-		t.bg.FillColor = colorDefault
-		t.bg.Refresh()
-		t.ts.Importance = widget.LowImportance
-		t.ts.Refresh()
-	}
-}
-
-type tappableRenderer struct {
-	content fyne.CanvasObject
-}
-
-func (r *tappableRenderer) Layout(size fyne.Size) {
-	r.content.Resize(size)
-}
-
-func (r *tappableRenderer) MinSize() fyne.Size {
-	return r.content.MinSize()
-}
-
-func (r *tappableRenderer) Refresh() {
-	r.content.Refresh()
-}
-
-func (r *tappableRenderer) Objects() []fyne.CanvasObject {
-	return []fyne.CanvasObject{r.content}
-}
-
-func (r *tappableRenderer) Destroy() {}
 
 // moveCursor moves the highlighted row by delta (+1 down, -1 up).
 func (u *UI) moveCursor(delta int) {
@@ -255,17 +148,26 @@ func (u *UI) setCursor(idx int) {
 		u.itemTs[u.cursorIdx].Refresh()
 
 		// Scroll to keep cursor visible. Each item is at index idx*2 (item + separator).
-		obj := u.itemsBox.Objects[idx*2]
-		pos := obj.Position()
-		u.scroll.Offset = fyne.NewPos(0, pos.Y)
-		u.scroll.Refresh()
+		if idx*2 < len(u.itemsBox.Objects) {
+			obj := u.itemsBox.Objects[idx*2]
+			pos := obj.Position()
+			u.scroll.Offset = fyne.NewPos(0, pos.Y)
+			u.scroll.Refresh()
+		}
 	}
 }
 
 // confirmCursor selects the currently highlighted row (Enter key).
 func (u *UI) confirmCursor() {
 	if u.cursorIdx >= 0 && u.cursorIdx < len(u.filtered) {
-		u.selectEntry(u.filtered[u.cursorIdx])
+		u.selectEntry(u.filtered[u.cursorIdx], false)
+	}
+}
+
+// confirmCursorShift selects the currently highlighted row with Shift held (Shift+Enter).
+func (u *UI) confirmCursorShift() {
+	if u.cursorIdx >= 0 && u.cursorIdx < len(u.filtered) {
+		u.selectEntry(u.filtered[u.cursorIdx], true)
 	}
 }
 
@@ -302,9 +204,10 @@ func (u *UI) ShowPicker(prevWindowID string) {
 }
 
 // showPickerNow schedules the picker to open on the Fyne main thread.
-func (u *UI) showPickerNow(_ string) {
+func (u *UI) showPickerNow(prevWinID string) {
 	log.Println("showing picker window")
 	fyne.Do(func() {
+		u.prevWinID = prevWinID
 		u.cursorIdx = -1
 		u.search.SetText("")
 		u.applyFilter("")
@@ -336,9 +239,10 @@ func (u *UI) applyFilter(query string) {
 	u.buildItems()
 }
 
-func (u *UI) selectEntry(e Entry) {
+func (u *UI) selectEntry(e Entry, shiftHeld bool) {
+	prevWinID := u.prevWinID // capture before hiding
 	u.hidePicker()
-	go u.simulatePaste(e.Content)
+	go u.simulatePaste(e.Content, shiftHeld, prevWinID)
 }
 
 // copyOnly writes content to the clipboard without pasting.
@@ -349,68 +253,86 @@ func (u *UI) copyOnly(e Entry) {
 		cmd.Stdin = strings.NewReader(e.Content)
 		if err := cmd.Run(); err != nil {
 			log.Printf("copy: wl-copy failed (%v), falling back to X11 clipboard", err)
-			clipboard.Write(clipboard.FmtText, []byte(e.Content))
+			// Keep the X11 selection alive until it is consumed by another app.
+			changed := clipboard.Write(clipboard.FmtText, []byte(e.Content))
+			go func() { <-changed }()
 		}
 		log.Println("copy: item copied to clipboard (no paste)")
 	}()
 }
 
 // simulatePaste writes content to the Wayland clipboard, then tries to send
-// Ctrl+V via ydotool (uinput-level, works on GNOME Wayland).
-// If ydotool is unavailable it notifies the user to press Ctrl+V manually.
+// Ctrl+V (or Ctrl+Shift+V when shiftHeld is true) via ydotool.
+// If ydotool is unavailable it notifies the user to paste manually.
 //
 // To enable full auto-paste on GNOME Wayland:
 //
 //	sudo apt install ydotool
 //	sudo systemctl enable --now ydotoold
 //	sudo usermod -aG input $USER   # then log out and back in
-func (u *UI) simulatePaste(content string) {
+func (u *UI) simulatePaste(content string, shiftHeld bool, prevWinID string) {
 	// Write to Wayland clipboard.
 	cmd := exec.Command("wl-copy")
 	cmd.Stdin = strings.NewReader(content)
 	if err := cmd.Run(); err != nil {
 		log.Printf("paste: wl-copy failed (%v), falling back to X11 clipboard", err)
-		clipboard.Write(clipboard.FmtText, []byte(content))
+		// Keep the X11 selection alive until it is consumed by another app.
+		changed := clipboard.Write(clipboard.FmtText, []byte(content))
+		go func() { <-changed }()
 	}
 
-	// Wait for compositor to return focus to the previous window.
-	time.Sleep(300 * time.Millisecond)
+	// Refocus the previous window so the key event lands in the right place.
+	if prevWinID != "" {
+		exec.Command("xdotool", "windowfocus", "--sync", prevWinID).Run()
+		time.Sleep(100 * time.Millisecond)
+	} else {
+		// No window ID — wait for compositor to return focus on its own.
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	// Choose the key combo based on whether Shift was held at selection time.
+	// Ctrl+Shift+V is used by terminals (e.g. GNOME Terminal, Kitty) for paste.
+	ydotoolKey := "ctrl+v"
+	xdotoolKey := "ctrl+v"
+	wtypeArgs := []string{"-M", "ctrl", "-k", "v", "-m", "ctrl"}
+	if shiftHeld {
+		ydotoolKey = "ctrl+shift+v"
+		xdotoolKey = "ctrl+shift+v"
+		wtypeArgs = []string{"-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl"}
+	}
 
 	// Try ydotool first (uinput-level, works everywhere on Wayland).
-	// Send both Ctrl+Shift+V (terminals) and Ctrl+V (other apps).
-	// Non-terminal apps ignore Ctrl+Shift+V; terminals ignore Ctrl+V.
-	if out, err := exec.Command("ydotool", "key", "ctrl+shift+v").CombinedOutput(); err == nil {
-		time.Sleep(50 * time.Millisecond)
-		exec.Command("ydotool", "key", "ctrl+v").Run()
-		log.Println("paste: Ctrl+Shift+V and Ctrl+V sent via ydotool")
+	if out, err := exec.Command("ydotool", "key", ydotoolKey).CombinedOutput(); err == nil {
+		log.Printf("paste: %s sent via ydotool", ydotoolKey)
 		return
 	} else {
 		log.Printf("paste: ydotool unavailable (%v: %s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// Fall back to xdotool (works for XWayland apps on GNOME Wayland).
-	if out, err := exec.Command("xdotool", "key", "ctrl+shift+v").CombinedOutput(); err == nil {
-		time.Sleep(50 * time.Millisecond)
-		exec.Command("xdotool", "key", "ctrl+v").Run()
-		log.Println("paste: Ctrl+Shift+V and Ctrl+V sent via xdotool")
+	if out, err := exec.Command("xdotool", "key", xdotoolKey).CombinedOutput(); err == nil {
+		log.Printf("paste: %s sent via xdotool", xdotoolKey)
 		return
 	} else {
 		log.Printf("paste: xdotool failed (%v: %s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// Fall back to wtype (works on wlroots compositors like Sway).
-	if out, err := exec.Command("wtype", "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl").CombinedOutput(); err == nil {
-		time.Sleep(50 * time.Millisecond)
-		exec.Command("wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl").Run()
-		log.Println("paste: Ctrl+Shift+V and Ctrl+V sent via wtype")
+	if out, err := exec.Command("wtype", wtypeArgs...).CombinedOutput(); err == nil {
+		log.Printf("paste: key sent via wtype (shift=%v)", shiftHeld)
 		return
 	} else {
 		log.Printf("paste: wtype failed (%v: %s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// No auto-paste available — notify the user.
-	exec.Command("notify-send", "-t", "2000", "-i", "edit-paste", "Clipboard Manager", "Copied — press Ctrl+V to paste").Run()
-	log.Println("paste: item in clipboard, press Ctrl+V to paste")
+	pasteKey := "Ctrl+V"
+	if shiftHeld {
+		pasteKey = "Ctrl+Shift+V"
+	}
+	exec.Command("notify-send", "-t", "2000", "-i", "edit-paste", "Clipboard Manager",
+		"Copied — press "+pasteKey+" to paste").Run()
+	log.Printf("paste: item in clipboard, press %s to paste", pasteKey)
 }
 
 // Run starts the fyne event loop (blocks until the app quits).
@@ -422,6 +344,7 @@ func (u *UI) Run() {
 		}
 	}()
 	u.app.Run()
+	close(u.showCh) // unblock the drain goroutine so it exits cleanly
 }
 
 func formatAge(t time.Time) string {

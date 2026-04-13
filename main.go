@@ -32,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 )
 
@@ -68,7 +69,9 @@ func runTrigger() {
 
 	// Capture active window before focus shifts to the picker.
 	if out, xerr := exec.Command("xdotool", "getactivewindow").Output(); xerr == nil {
-		os.WriteFile(prevWinFile, []byte(strings.TrimSpace(string(out))), 0o644)
+		if werr := os.WriteFile(prevWinFile, []byte(strings.TrimSpace(string(out))), 0o644); werr != nil {
+			log.Printf("warning: could not save previous window ID: %v", werr)
+		}
 	} else {
 		os.Remove(prevWinFile)
 	}
@@ -93,6 +96,12 @@ func pidFromFile() int {
 	if err != nil {
 		return 0
 	}
+	// Verify the PID still belongs to clipd — stale PID files can point to
+	// an unrelated process that reused the PID after a crash.
+	comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	if err != nil || strings.TrimSpace(string(comm)) != "clipd" {
+		return 0
+	}
 	return pid
 }
 
@@ -112,7 +121,49 @@ func pidFromPgrep() int {
 	return 0
 }
 
+// killExisting terminates any already-running clipd daemon so only one
+// instance runs at a time. It sends SIGTERM and waits up to 3 seconds for a
+// graceful exit, then falls back to SIGKILL.
+func killExisting() {
+	pid := pidFromFile()
+	if pid == 0 {
+		pid = pidFromPgrep()
+	}
+	if pid == 0 {
+		return
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+
+	log.Printf("found existing clipd (pid %d), sending SIGTERM", pid)
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return // already gone
+	}
+
+	// Wait up to 3 seconds for a graceful exit.
+	const grace = 3 * time.Second
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		// Signal 0 checks liveness without side effects.
+		if proc.Signal(syscall.Signal(0)) != nil {
+			log.Printf("pid %d exited cleanly", pid)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	log.Printf("pid %d did not exit within %s, sending SIGKILL", pid, grace)
+	proc.Signal(syscall.SIGKILL)
+	// Brief pause so the OS reclaims the PID before we write our own.
+	time.Sleep(200 * time.Millisecond)
+}
+
 func runDaemon() {
+	killExisting()
+
 	// Write PID file so `clipd -trigger` can find us.
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
 		log.Printf("warning: could not write PID file: %v", err)
@@ -145,7 +196,7 @@ func runDaemon() {
 	go func() {
 		<-sigs
 		cancel()
-		a.Quit()
+		fyne.Do(a.Quit)
 	}()
 
 	ui.Run()
