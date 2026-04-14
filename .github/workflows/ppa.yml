@@ -41,9 +41,12 @@ jobs:
         id: version
         run: |
           REF="${GITHUB_REF_NAME}"
-          REF="${REF#beta-}"
-          REF="${REF#v}"
-          echo "VERSION=${REF}" >> "$GITHUB_OUTPUT"
+          if [[ "$REF" == beta-v* ]]; then
+            VERSION="${REF#beta-v}~beta"
+          else
+            VERSION="${REF#v}"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Stamp version into debian/changelog
         run: |

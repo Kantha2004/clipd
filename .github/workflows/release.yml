@@ -30,7 +30,14 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          REF="${GITHUB_REF_NAME}"
+          if [[ "$REF" == beta-v* ]]; then
+            VERSION="${REF#beta-v}~beta"
+          else
+            VERSION="${REF#v}"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build .deb
         run: make deb VERSION=${{ steps.version.outputs.VERSION }}
