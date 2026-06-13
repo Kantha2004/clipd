@@ -54,7 +54,8 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
           SUITES=("noble" "resolute")
-          for SUITE in "${SUITES[@]}"; do
+          for i in "${!SUITES[@]}"; do
+            SUITE="${SUITES[$i]}"
             echo "========================================="
             echo "Processing suite: $SUITE"
             echo "========================================="
@@ -74,7 +75,14 @@ jobs:
             
             # Upload using dput
             dput ppa:kantha2004/clipd ../clipd_${STAMPED_VERSION}_source.changes
+            
+            # Sleep to prevent Launchpad FTP rate-limiting or session persistence issues
+            if [ $i -lt $((${#SUITES[@]} - 1)) ]; then
+              echo "Sleeping 20 seconds before the next suite upload..."
+              sleep 20
+            fi
           done
+
 
 
 
