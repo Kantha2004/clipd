@@ -54,7 +54,8 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
           SUITES=("noble" "resolute")
-          for SUITE in "${SUITES[@]}"; do
+          for i in "${!SUITES[@]}"; do
+            SUITE="${SUITES[$i]}"
             echo "========================================="
             echo "Processing suite: $SUITE"
             echo "========================================="
@@ -68,9 +69,17 @@ jobs:
             # Replace version inside parentheses and the suite name
             sed -i "1s/([^)]*)/(${STAMPED_VERSION})/; 1s/) [a-z0-9-]*;/) ${SUITE};/" debian/changelog
             
+            # Use -sa (include orig source) for the first suite, and -sd (exclude orig source) for subsequent suites
+            if [ $i -eq 0 ]; then
+              DEBUILD_FLAGS="-sa"
+            else
+              DEBUILD_FLAGS="-sd"
+            fi
+            
             # Build the source package
-            make source VERSION="${VERSION}"
+            make source VERSION="${VERSION}" DEBUILD_FLAGS="${DEBUILD_FLAGS}"
             
             # Upload using dput
             dput ppa:kantha2004/clipd ../clipd_${STAMPED_VERSION}_source.changes
           done
+
