@@ -16,7 +16,7 @@
 // DE shortcut setup (bind your chosen key to):
 //
 //	/path/to/clipd -trigger
-package main
+package clipboard
 
 import (
 	"context"
@@ -32,16 +32,18 @@ import (
 	"syscall"
 	"time"
 
+	"clipboard/config"
+	"clipboard/core"
+	"clipboard/ui"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 )
 
-var (
-	pidFile     = filepath.Join(os.TempDir(), "clipd.pid")
-	prevWinFile = filepath.Join(os.TempDir(), "clipd.prevwin")
-)
+var pidFile = filepath.Join(os.TempDir(), "clipd.pid")
 
-func main() {
+// Main is the library entry point called by the cmd/clipd wrapper.
+func Main() {
 	log.SetPrefix("[clipd] ")
 
 	trigger := flag.Bool("trigger", false, "open the picker in a running clipd daemon")
@@ -69,11 +71,11 @@ func runTrigger() {
 
 	// Capture active window before focus shifts to the picker.
 	if out, xerr := exec.Command("xdotool", "getactivewindow").Output(); xerr == nil {
-		if werr := os.WriteFile(prevWinFile, []byte(strings.TrimSpace(string(out))), 0o644); werr != nil {
+		if werr := os.WriteFile(core.PrevWinFile, []byte(strings.TrimSpace(string(out))), 0o644); werr != nil {
 			log.Printf("warning: could not save previous window ID: %v", werr)
 		}
 	} else {
-		os.Remove(prevWinFile)
+		os.Remove(core.PrevWinFile)
 	}
 
 	proc, err := os.FindProcess(pid)
@@ -163,6 +165,7 @@ func killExisting() {
 
 func runDaemon() {
 	killExisting()
+	config.LoadTheme()
 
 	// Write PID file so `clipd -trigger` can find us.
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
@@ -170,23 +173,26 @@ func runDaemon() {
 	}
 	defer os.Remove(pidFile)
 
-	store := NewHistoryStore(24*time.Hour, 200)
+	store := core.NewHistoryStore(24*time.Hour, 200)
+	store.Load()
 
 	a := app.NewWithID("io.github.clipd")
-	a.SetIcon(resourceIconSvg)
-	a.Settings().SetTheme(clipTheme{})
-	ui := NewUI(a, store)
+	a.SetIcon(ui.ResourceIconSvg)
+	a.Settings().SetTheme(ui.ClipTheme{})
+	pickerUI := ui.NewUI(a, store)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	ui.StartThemeMonitor(ctx)
+
 	go func() {
-		if err := RunMonitor(ctx, store); err != nil && ctx.Err() == nil {
+		if err := core.RunMonitor(ctx, store); err != nil && ctx.Err() == nil {
 			log.Printf("monitor stopped: %v", err)
 		}
 	}()
 
 	go func() {
-		if err := RunHotkey(ctx, ui.ShowPicker); err != nil && ctx.Err() == nil {
+		if err := core.RunHotkey(ctx, pickerUI.ShowPicker); err != nil && ctx.Err() == nil {
 			log.Printf("hotkey stopped: %v", err)
 		}
 	}()
@@ -199,6 +205,6 @@ func runDaemon() {
 		fyne.Do(a.Quit)
 	}()
 
-	ui.Run()
+	pickerUI.Run()
 	cancel()
 }

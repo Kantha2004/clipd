@@ -23,11 +23,14 @@ PKGNAME 	:= clipd_$(VERSION)_$(ARCH)
 PKGDIR  	:= $(BINDIR)/deb/$(PKGNAME)
 PPA     	:= ppa:kantha2004/clipd
 
-.PHONY: build install install-services enable uninstall deb vendor source ppa clean
+.PHONY: build test install install-services enable uninstall deb vendor source ppa clean
 
 build:
 	mkdir -p $(BINDIR)
-	go build -o $(BINDIR)/clipd .
+	go build -o $(BINDIR)/clipd ./cmd/clipd
+
+test:
+	go test ./tests/...
 
 install: build install-services
 	mkdir -p $(INSTALLDIR) $(LIBDIR)
@@ -58,13 +61,13 @@ uninstall:
 
 deb: build
 	rm -rf $(PKGDIR)
-	mkdir -p $(PKGDIR)/usr/local/bin
+	mkdir -p $(PKGDIR)/usr/bin
 	mkdir -p $(PKGDIR)/usr/lib/systemd/user
 	mkdir -p $(PKGDIR)/usr/lib/clipd
 	mkdir -p $(PKGDIR)/etc/xdg/autostart
 	mkdir -p $(PKGDIR)/DEBIAN
-	cp $(BINDIR)/clipd $(PKGDIR)/usr/local/bin/clipd
-	sed 's|%h/.local/bin/clipd|/usr/local/bin/clipd|' \
+	cp $(BINDIR)/clipd $(PKGDIR)/usr/bin/clipd
+	sed 's|%h/.local/bin/clipd|/usr/bin/clipd|' \
 		systemd/clipd.service > $(PKGDIR)/usr/lib/systemd/user/clipd.service
 	cp systemd/ydotoold.service $(PKGDIR)/usr/lib/systemd/user/ydotoold.service
 	install -m 755 packaging/setup-shortcut    $(PKGDIR)/usr/lib/clipd/setup-shortcut

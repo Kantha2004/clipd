@@ -1,13 +1,16 @@
-package main
+package core
 
 import (
 	"context"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
+
+var PrevWinFile = filepath.Join(os.TempDir(), "clipd.prevwin")
 
 // RunHotkey listens for SIGUSR1 and calls onTrigger each time it fires.
 //
@@ -28,7 +31,7 @@ func RunHotkey(ctx context.Context, onTrigger func(prevWindowID string)) error {
 		select {
 		case <-ch:
 			log.Println("SIGUSR1 received — showing picker")
-			onTrigger(readPrevWin())
+			onTrigger(ReadPrevWin())
 		case <-ctx.Done():
 			return nil
 		}
@@ -36,8 +39,8 @@ func RunHotkey(ctx context.Context, onTrigger func(prevWindowID string)) error {
 }
 
 // readPrevWin reads the window ID written by `clipd -trigger` at key-press time.
-func readPrevWin() string {
-	data, err := os.ReadFile(prevWinFile)
+func ReadPrevWin() string {
+	data, err := os.ReadFile(PrevWinFile)
 	if err != nil {
 		return ""
 	}

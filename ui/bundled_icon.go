@@ -1,8 +1,8 @@
-package main
+package ui
 
 import "fyne.io/fyne/v2"
 
-var resourceIconSvg = &fyne.StaticResource{
+var ResourceIconSvg = &fyne.StaticResource{
 	StaticName: "clipboard-tasks.svg",
 	StaticContent: []byte(`<?xml version="1.0" encoding="iso-8859-1"?>
 <!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->

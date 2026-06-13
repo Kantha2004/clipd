@@ -1,7 +1,12 @@
 #!/bin/sh
 set -e
 
-echo "clipd installed to /usr/local/bin/clipd"
+CLIPD_BIN="/usr/bin/clipd"
+if [ ! -f "$CLIPD_BIN" ]; then
+    CLIPD_BIN="/usr/local/bin/clipd"
+fi
+
+echo "clipd installed to $CLIPD_BIN"
 
 if [ -n "$SUDO_USER" ]; then
     USER_UID=$(id -u "$SUDO_USER" 2>/dev/null) || USER_UID=""
@@ -24,7 +29,7 @@ if [ -n "$SUDO_USER" ]; then
         sudo -u "$SUDO_USER" \
             XDG_RUNTIME_DIR="$XDG_RT" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_SOCK}" \
-            /usr/lib/clipd/setup-shortcut /usr/local/bin/clipd || true
+            /usr/lib/clipd/setup-shortcut "$CLIPD_BIN" || true
     else
         # User not logged in — set the shortcut at next login via XDG autostart
         AUTOSTART_DIR="/home/${SUDO_USER}/.config/autostart"
@@ -40,5 +45,5 @@ else
     echo "  systemctl --user daemon-reload"
     echo "  systemctl --user enable --now clipd"
     echo ""
-    echo "Then bind a key in your DE to: /usr/local/bin/clipd -trigger"
+    echo "Then bind a key in your DE to: $CLIPD_BIN -trigger"
 fi

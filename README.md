@@ -4,36 +4,38 @@ A lightweight clipboard history daemon with a searchable picker UI, built with G
 
 ## Features
 
-- Monitors the system clipboard and keeps a history of recent copies (200 entries, 24-hour max age)
-- Searchable picker window triggered by a keyboard shortcut
-- Keyboard navigation: arrow keys, Enter to select, Escape to close
-- **Shift+Enter or Shift+Click** pastes using Ctrl+Shift+V (for terminals)
-- Auto-paste: selected items are written to the clipboard and the paste key is injected automatically, targeting the previously focused window
-- Single-instance guard: starting a second daemon gracefully replaces the first
-- System tray with quick access to history, clear, and quit
-- Deduplication and automatic expiry
+- **GTK Theme Auto-Sync**: Automatically synchronizes the picker interface colors with your system's active GTK theme and accent color (Ubuntu Yaru Orange, Red, Blue, Purple, etc.) and dark/light modes.
+- **Smart Mimetype Previews**: Detects copied file paths on the fly (e.g., PDFs, scripts, code, archives) and displays custom mimetype icons matching your active desktop icon theme (Yaru or Adwaita fallbacks).
+- **Raw Image Support**: Saves raw image clipboard copies (like screenshots) and generates local image thumbnails under `~/.config/clipd/media/` for rendering in the picker.
+- **Automatic Garbage Collection**: Cleans up generated media and thumbnail files when clips are deleted or evicted (due to size or age limits) and runs an asynchronous scan on startup to delete orphaned media files.
+- **Up-Arrow Search Focus**: Seamless keyboard navigation that returns focus to the search bar and unselects list items when pressing the Up arrow from the first item in history.
+- **Polished Row Selection**: Features a 5px accent-colored left indicator bar on selection, using a subtle row hover background to feel like a premium, native GTK application.
+- **Automated Auto-Paste**: Selected items are written to the clipboard and the paste key is injected automatically into the target window (with smart terminal fallback to `Ctrl+Shift+V`).
+- **Single-instance Guard**: Launching a new daemon process gracefully kills and replaces the existing active instance to prevent resource conflicts.
+- **System Tray Integration**: Full system tray menu for quick history picker access, clear history, and pause/resume monitoring.
 
 ---
 
 ## Install
 
-### Option A — Download `.deb` (easiest)
-
-Download the latest `clipd_*_amd64.deb` from the [Releases](../../releases) page:
+### Option A — PPA (Preferred)
 
 ```bash
-sudo dpkg -i clipd_*_amd64.deb
+sudo add-apt-repository ppa:kantha2004/clipd
+sudo apt update
+sudo apt install clipd
 ```
 
 The installer automatically:
 - Enables and starts the `clipd` systemd user service
 - Registers **Super+V** as the keyboard shortcut (GNOME only)
 
-### Option B — PPA
+### Option B — Download `.deb` (Alternative)
+
+Download the latest `clipd_*_amd64.deb` from the [Releases](../../releases) page:
 
 ```bash
-sudo add-apt-repository ppa:kantha2004/clipd
-sudo apt install clipd
+sudo dpkg -i clipd_*_amd64.deb
 ```
 
 Same automatic setup as Option A.

@@ -18,7 +18,8 @@ Homepage: https://github.com/kantha2004/clipd
 Package: clipd
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Recommends: wl-clipboard, ydotool | xdotool
+Recommends: wl-clipboard, ydotool | xdotool, libnotify-bin, ffmpeg
+Suggests: wtype, yaru-theme-icon, libglib2.0-bin
 Description: Clipboard history manager for Wayland/X11
  A keyboard-driven clipboard history daemon with a system-tray picker.
  Supports Wayland (wl-copy, ydotool) and X11 (xdotool).

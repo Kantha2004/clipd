@@ -10,7 +10,7 @@ export GOTOOLCHAIN  = local
 
 override_dh_auto_build:
 	mkdir -p bin
-	go build -trimpath -ldflags="-s -w" -o bin/clipd .
+	go build -trimpath -ldflags="-s -w" -o bin/clipd ./cmd/clipd
 
 override_dh_auto_install:
 	install -Dm755 bin/clipd \
