@@ -53,7 +53,7 @@ jobs:
           DEBSIGN_KEYID: ${{ steps.import-gpg.outputs.fingerprint }}
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          SUITES=("noble" "resolute")
+          SUITES=("resolute" "noble")
           for i in "${!SUITES[@]}"; do
             SUITE="${SUITES[$i]}"
             echo "========================================="
