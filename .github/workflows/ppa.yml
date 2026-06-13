@@ -48,15 +48,29 @@ jobs:
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Stamp version into debian/changelog
-        run: |
-          sed -i "1s/([^)]*)/(${{ steps.version.outputs.VERSION }}-1)/" \
-            debian/changelog
-
-      - name: Build signed source package
+      - name: Build and upload source packages for multiple suites
         env:
           DEBSIGN_KEYID: ${{ steps.import-gpg.outputs.fingerprint }}
-        run: make source VERSION=${{ steps.version.outputs.VERSION }}
-
-      - name: Upload to Launchpad PPA
-        run: make ppa VERSION=${{ steps.version.outputs.VERSION }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          SUITES=("noble" "resolute")
+          for SUITE in "${SUITES[@]}"; do
+            echo "========================================="
+            echo "Processing suite: $SUITE"
+            echo "========================================="
+            
+            # Reset changelog to avoid cumulative changes
+            git checkout debian/changelog
+            
+            # Format: version-1~suite1 (e.g. 1.1.8-1~noble1)
+            STAMPED_VERSION="${VERSION}-1~${SUITE}1"
+            
+            # Replace version inside parentheses and the suite name
+            sed -i "1s/([^)]*)/(${STAMPED_VERSION})/; 1s/) [a-z0-9-]*;/) ${SUITE};/" debian/changelog
+            
+            # Build the source package
+            make source VERSION="${VERSION}"
+            
+            # Upload using dput
+            dput ppa:kantha2004/clipd ../clipd_${STAMPED_VERSION}_source.changes
+          done
