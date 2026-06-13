@@ -81,5 +81,12 @@ jobs:
             
             # Upload using dput
             dput ppa:kantha2004/clipd ../clipd_${STAMPED_VERSION}_source.changes
+            
+            # Sleep to prevent Launchpad FTP rate-limiting or session persistence issues
+            if [ $i -lt $((${#SUITES[@]} - 1)) ]; then
+              echo "Sleeping 15 seconds before the next suite upload..."
+              sleep 15
+            fi
           done
+
 
