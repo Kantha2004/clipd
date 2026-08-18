@@ -8,8 +8,12 @@ on:
 
 jobs:
   ppa:
-    name: Upload source package to Launchpad PPA
+    name: Upload source package to Launchpad PPA (${{ matrix.suite }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [noble, resolute]
 
     steps:
       - uses: actions/checkout@v6
@@ -28,6 +32,21 @@ jobs:
             libgl-dev libx11-dev \
             libxrandr-dev libxinerama-dev libxcursor-dev \
             libxi-dev libxxf86vm-dev
+
+      - name: Configure dput
+        run: |
+          cat << 'EOF' > ~/.dput.cf
+          [DEFAULT]
+          default_host_main = ppa
+
+          [ppa]
+          fqdn = ppa.launchpad.net
+          method = ftp
+          incoming = ~%(ppa)s/ubuntu
+          login = anonymous
+          allow_unsigned_uploads = 0
+          passive_ftp = 1
+          EOF
 
       # Handles gpg-agent setup for non-interactive signing in CI.
       - name: Import GPG signing key
@@ -48,41 +67,37 @@ jobs:
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and upload source packages for multiple suites
+      - name: Build and upload source package
         env:
           DEBSIGN_KEYID: ${{ steps.import-gpg.outputs.fingerprint }}
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          SUITES=("resolute" "noble")
-          for i in "${!SUITES[@]}"; do
-            SUITE="${SUITES[$i]}"
-            echo "========================================="
-            echo "Processing suite: $SUITE"
-            echo "========================================="
-            
-            # Reset changelog to avoid cumulative changes
-            git checkout debian/changelog
-            
-            # Format: version~suite-1 (e.g. 1.1.8-1~beta~noble-1)
-            # This makes the upstream version unique per suite, preventing any file collisions on Launchpad.
-            STAMPED_VERSION="${VERSION}~${SUITE}-1"
-            
-            # Replace version inside parentheses and the suite name
-            sed -i "1s/([^)]*)/(${STAMPED_VERSION})/; 1s/) [a-z0-9-]*;/) ${SUITE};/" debian/changelog
-            
-            # Build the source package using the suite-specific upstream version
-            make source VERSION="${VERSION}~${SUITE}"
-            
-            # Upload using dput
-            dput ppa:kantha2004/clipd ../clipd_${STAMPED_VERSION}_source.changes
-            
-            # Sleep to prevent Launchpad FTP rate-limiting or session persistence issues
-            if [ $i -lt $((${#SUITES[@]} - 1)) ]; then
-              echo "Sleeping 20 seconds before the next suite upload..."
-              sleep 20
+          SUITE="${{ matrix.suite }}"
+          echo "========================================="
+          echo "Processing suite: $SUITE"
+          echo "========================================="
+          
+          # Format: version~suite-1 (e.g. 1.1.8-8~beta~noble-1)
+          STAMPED_VERSION="${VERSION}~${SUITE}-1"
+          
+          # Replace version inside parentheses and the suite name
+          sed -i "1s/([^)]*)/(${STAMPED_VERSION})/; 1s/) [a-z0-9-]*;/) ${SUITE};/" debian/changelog
+          
+          # Build the source package using the suite-specific upstream version
+          make source VERSION="${VERSION}~${SUITE}"
+          
+          # Upload using dput with retry logic
+          MAX_RETRIES=3
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $attempt of $MAX_RETRIES to upload..."
+            if dput ppa:kantha2004/clipd ../clipd_${STAMPED_VERSION}_source.changes; then
+              echo "Upload succeeded!"
+              break
             fi
+            if [ $attempt -eq $MAX_RETRIES ]; then
+              echo "Failed to upload after $MAX_RETRIES attempts."
+              exit 1
+            fi
+            echo "Upload failed, retrying in 15 seconds..."
+            sleep 15
           done
-
-
-
-
