@@ -207,4 +207,5 @@ func runDaemon() {
 
 	pickerUI.Run()
 	cancel()
+	store.Flush()
 }

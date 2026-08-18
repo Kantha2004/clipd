@@ -27,6 +27,9 @@ type Entry struct {
 	ImageData     []byte // For raw clipboard images
 	FilePath      string // For file paths to images/videos
 	thumbnailPath string // Path to the generated thumbnail on disk
+
+	filePathsCache  []string // memoized NormalizeFilePaths(Content); Content is immutable after creation
+	filePathsCached bool
 }
 
 func (e *Entry) GetThumbnailPath() string {
@@ -124,6 +127,9 @@ func (e *Entry) Preview() string {
 		return "🎥 Video File: " + filepath.Base(e.FilePath)
 	}
 	if e.FilePath != "" {
+		if paths := e.FilePaths(); len(paths) > 1 {
+			return fmt.Sprintf("📁 %d Files: %s", len(paths), filepath.Base(paths[0]))
+		}
 		return "📄 File: " + filepath.Base(e.FilePath)
 	}
 
@@ -167,21 +173,57 @@ func (e *Entry) ProcessThumbnail(onComplete func()) {
 	}
 }
 
-// normalizeFilePath extracts and validates an absolute file path from clipboard content.
+// NormalizeFilePaths extracts and validates every absolute file path from
+// clipboard content, one per line (e.g. a multi-file "Copy" from a file
+// manager puts one file:// URI per line).
+func NormalizeFilePaths(content string) []string {
+	var paths []string
+	for _, line := range strings.Split(content, "\n") {
+		s := strings.TrimSpace(line)
+		s = strings.TrimPrefix(s, "file://")
+		s = strings.ReplaceAll(s, "%20", " ")
+		if !filepath.IsAbs(s) {
+			continue
+		}
+		stat, err := os.Stat(s)
+		if err != nil || stat.IsDir() {
+			continue
+		}
+		paths = append(paths, s)
+	}
+	return paths
+}
+
+// NormalizeFilePath extracts and validates the first absolute file path from
+// clipboard content.
 func NormalizeFilePath(content string) string {
-	s := strings.TrimSpace(content)
-	s = strings.TrimPrefix(s, "file://")
-	s = strings.ReplaceAll(s, "%20", " ")
-	line, _, _ := strings.Cut(s, "\n")
-	line = strings.TrimSpace(line)
-	if !filepath.IsAbs(line) {
+	paths := NormalizeFilePaths(content)
+	if len(paths) == 0 {
 		return ""
 	}
-	stat, err := os.Stat(line)
-	if err != nil || stat.IsDir() {
-		return ""
+	return paths[0]
+}
+
+// FilePaths returns every valid file path carried by this entry's original
+// clipboard content (more than one when multiple files were copied at once).
+// The result is memoized since it's called repeatedly on every row render
+// (preview, badge, thumbnail) and Content never changes after the entry is created.
+func (e *Entry) FilePaths() []string {
+	e.mu.RLock()
+	if e.filePathsCached {
+		defer e.mu.RUnlock()
+		return e.filePathsCache
 	}
-	return line
+	e.mu.RUnlock()
+
+	paths := NormalizeFilePaths(e.Content)
+
+	e.mu.Lock()
+	e.filePathsCache = paths
+	e.filePathsCached = true
+	e.mu.Unlock()
+
+	return paths
 }
 
 // generateVideoThumb extracts a frame from src into thumbPath, trying 1s then 0s as offsets.
@@ -215,6 +257,10 @@ type HistoryStore struct {
 	maxAge    time.Duration
 	maxSize   int
 	onChanged func()
+
+	saveMu        sync.Mutex
+	savePending   bool
+	saveRequested bool
 }
 
 func NewHistoryStore(maxAge time.Duration, maxSize int) *HistoryStore {
@@ -370,19 +416,64 @@ func (h *HistoryStore) Remove(entry *Entry) {
 	}
 }
 
+// save persists the store to disk. Callers (AddText, AddImage, Remove, Clear)
+// can fire this on every mutation without it becoming the bottleneck: bursts
+// of calls coalesce into a single background writer instead of piling up one
+// full marshal+write per call.
 func (h *HistoryStore) save() {
+	h.saveMu.Lock()
+	if h.savePending {
+		h.saveRequested = true
+		h.saveMu.Unlock()
+		return
+	}
+	h.savePending = true
+	h.saveMu.Unlock()
+
+	go h.saveLoop()
+}
+
+func (h *HistoryStore) saveLoop() {
+	for {
+		h.writeToDisk()
+
+		h.saveMu.Lock()
+		if h.saveRequested {
+			h.saveRequested = false
+			h.saveMu.Unlock()
+			continue
+		}
+		h.savePending = false
+		h.saveMu.Unlock()
+		return
+	}
+}
+
+// Flush blocks until any in-flight or queued save() has finished writing to
+// disk. Call this before the process exits, since save() now coalesces
+// bursts onto a background writer and a bare quit could otherwise race it.
+func (h *HistoryStore) Flush() {
+	for {
+		h.saveMu.Lock()
+		pending := h.savePending
+		h.saveMu.Unlock()
+		if !pending {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func (h *HistoryStore) writeToDisk() {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	dir := StorageDir()
-	path := filepath.Join(dir, "history.json")
-
 	data, err := json.MarshalIndent(h.entries, "", "  ")
+	h.mu.RUnlock()
 	if err != nil {
 		log.Printf("error marshaling history: %v", err)
 		return
 	}
 
+	path := filepath.Join(StorageDir(), "history.json")
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		log.Printf("error saving history: %v", err)
 	}

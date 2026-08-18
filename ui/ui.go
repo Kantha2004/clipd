@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"clipboard/config"
@@ -47,15 +48,11 @@ type UI struct {
 	store  *HistoryStore
 	window fyne.Window
 
-	search   *navEntry
-	itemsBox *fyne.Container
-	scroll   *container.Scroll
+	search *navEntry
+	list   *widget.List
 
-	filtered       []*Entry
-	cursorIdx      int // highlighted row index; -1 = none
-	itemBgs        []*canvas.Rectangle
-	itemIndicators []*indicatorBar
-	itemTs         []*widget.Label
+	filtered  []*Entry
+	cursorIdx int // highlighted row index; -1 = none
 
 	// showCh receives trigger events from the hotkey goroutine.
 	showCh    chan string
@@ -132,8 +129,7 @@ func (u *UI) buildWindow() {
 		container.NewBorder(nil, nil, nil, rightSearchSide),
 	)
 
-	u.itemsBox = container.NewVBox()
-	u.scroll = container.NewVScroll(u.itemsBox)
+	u.list = widget.NewList(u.listLength, u.createHistoryRow, u.updateHistoryRow)
 
 	// Footer: ↑ ↓ Navigation | Enter Paste | Shift+Enter Term Paste
 	keyUp := container.NewCenter(createKeycap("↑"))
@@ -193,93 +189,133 @@ func (u *UI) buildWindow() {
 	u.window.SetContent(container.NewPadded(container.NewBorder(
 		container.NewVBox(header, searchContainer),
 		footer, nil, nil,
-		u.scroll,
+		u.list,
 	)))
 }
 
-func (u *UI) buildItems() {
-	u.itemsBox.Objects = nil
-	u.itemBgs = nil
-	u.itemIndicators = nil
-	u.itemTs = nil
+// historyRow is a pooled, reusable row widget for u.list. Fyne's widget.List
+// keeps only as many of these alive as there are visible rows, and rebinds
+// them to a different filtered index as the user scrolls — instead of
+// building one full widget tree per history entry up front.
+type historyRow struct {
+	*tappableContainer
+	idx       int
+	entry     *Entry
+	bg        *canvas.Rectangle
+	ind       *indicatorBar
+	ts        *widget.Label
+	preview   *widget.Label
+	badgeWrap *fyne.Container
+	thumbWrap *fyne.Container
+}
+
+func (u *UI) listLength() int {
+	return len(u.filtered)
+}
+
+func (u *UI) createHistoryRow() fyne.CanvasObject {
+	row := &historyRow{idx: -1}
+
+	row.preview = widget.NewLabel("")
+	row.preview.TextStyle = fyne.TextStyle{Monospace: true}
+
+	row.badgeWrap = container.NewHBox()
+	row.ts = widget.NewLabel("")
+	row.ts.Importance = widget.LowImportance
+	subtitleBox := container.NewHBox(row.badgeWrap, row.ts)
+
+	row.bg = canvas.NewRectangle(config.ColorDefault)
+	row.ind = newIndicatorBar(color.Transparent)
+	row.thumbWrap = container.NewHBox()
 
 	btnSize := config.CurrentTheme.GetSize("copy_btn_size")
 
-	for i, e := range u.filtered {
-		entry := e
-		itemIdx := i
-
-		preview := widget.NewLabel(SingleLinePreview(entry.Preview()))
-		preview.TextStyle = fyne.TextStyle{Monospace: true}
-
-		subtitleBox := container.NewHBox()
-		if badge := getEntryBadge(entry); badge != nil {
-			subtitleBox.Add(container.NewCenter(badge))
-			dot := canvas.NewText(" • ", config.CurrentTheme.GetColor("placeholder"))
-			dot.TextSize = 10
-			subtitleBox.Add(container.NewCenter(dot))
+	copyIcon := newTappableIcon(theme.ContentCopyIcon(), func() {
+		if row.entry != nil {
+			u.copyOnly(row.entry)
 		}
+	})
+	copyBtn := container.NewGridWrap(fyne.NewSize(btnSize, btnSize), copyIcon)
 
-		ts := widget.NewLabel(FormatAge(entry.Timestamp))
-		ts.Importance = widget.LowImportance
-		ts.TextStyle = fyne.TextStyle{}
-		subtitleBox.Add(ts)
-
-		copyIcon := newTappableIcon(theme.ContentCopyIcon(), func() {
-			u.copyOnly(entry)
-		})
-		copyBtn := container.NewGridWrap(fyne.NewSize(btnSize, btnSize), copyIcon)
-
-		removeIcon := newTappableIcon(theme.CancelIcon(), func() {
-			u.store.Remove(entry)
-		})
-		removeBtn := container.NewGridWrap(fyne.NewSize(btnSize, btnSize), removeIcon)
-
-		bg := canvas.NewRectangle(config.ColorDefault)
-		u.itemBgs = append(u.itemBgs, bg)
-		u.itemTs = append(u.itemTs, ts)
-
-		ind := newIndicatorBar(color.Transparent)
-		u.itemIndicators = append(u.itemIndicators, ind)
-
-		thumbObj := createThumbnailObject(entry)
-
-		textCol := container.NewVBox(preview, subtitleBox)
-
-		leftSpacer := canvas.NewRectangle(color.Transparent)
-		leftSpacer.SetMinSize(fyne.NewSize(8, 0))
-		leftSide := container.NewHBox(ind, leftSpacer)
-		if thumbObj != nil {
-			leftSide.Add(container.NewCenter(thumbObj))
-			thumbSpacer := canvas.NewRectangle(color.Transparent)
-			thumbSpacer.SetMinSize(fyne.NewSize(8, 0))
-			leftSide.Add(thumbSpacer)
+	removeIcon := newTappableIcon(theme.CancelIcon(), func() {
+		if row.entry != nil {
+			u.store.Remove(row.entry)
 		}
+	})
+	removeBtn := container.NewGridWrap(fyne.NewSize(btnSize, btnSize), removeIcon)
 
-		btnSpacer := canvas.NewRectangle(color.Transparent)
-		btnSpacer.SetMinSize(fyne.NewSize(6, 0))
+	leftSpacer := canvas.NewRectangle(color.Transparent)
+	leftSpacer.SetMinSize(fyne.NewSize(8, 0))
+	leftSide := container.NewHBox(row.ind, leftSpacer, row.thumbWrap)
 
-		rightSpacer := canvas.NewRectangle(color.Transparent)
-		rightSpacer.SetMinSize(fyne.NewSize(8, 0))
-		rightSide := container.NewHBox(
-			container.NewCenter(copyBtn),
-			btnSpacer,
-			container.NewCenter(removeBtn),
-			rightSpacer,
-		)
+	btnSpacer := canvas.NewRectangle(color.Transparent)
+	btnSpacer.SetMinSize(fyne.NewSize(6, 0))
+	rightSpacer := canvas.NewRectangle(color.Transparent)
+	rightSpacer.SetMinSize(fyne.NewSize(8, 0))
+	rightSide := container.NewHBox(
+		container.NewCenter(copyBtn),
+		btnSpacer,
+		container.NewCenter(removeBtn),
+		rightSpacer,
+	)
 
-		content := container.NewBorder(nil, nil, leftSide, rightSide, textCol)
-		item := container.NewStack(bg, content)
+	textCol := container.NewVBox(row.preview, subtitleBox)
+	content := container.NewBorder(nil, nil, leftSide, rightSide, textCol)
+	item := container.NewStack(row.bg, content)
 
-		tappable := newTappableContainer(item, bg, ts, func() bool {
-			return u.cursorIdx == itemIdx
-		}, func(shiftHeld bool) {
-			u.selectEntry(entry, shiftHeld)
-		})
+	row.tappableContainer = newTappableContainer(item, row.bg, row.ts, func() bool {
+		return u.cursorIdx == row.idx
+	}, func(shiftHeld bool) {
+		if row.entry != nil {
+			u.selectEntry(row.entry, shiftHeld)
+		}
+	})
 
-		u.itemsBox.Add(tappable)
+	return row
+}
+
+func (u *UI) updateHistoryRow(id widget.ListItemID, obj fyne.CanvasObject) {
+	row := obj.(*historyRow)
+	if id < 0 || id >= len(u.filtered) {
+		return
 	}
-	u.itemsBox.Refresh()
+	entry := u.filtered[id]
+	row.idx = id
+	row.entry = entry
+
+	row.preview.SetText(SingleLinePreview(entry.Preview()))
+	row.ts.SetText(FormatAge(entry.Timestamp))
+
+	row.badgeWrap.Objects = nil
+	if badge := getEntryBadge(entry); badge != nil {
+		row.badgeWrap.Add(container.NewCenter(badge))
+		dot := canvas.NewText(" • ", config.CurrentTheme.GetColor("placeholder"))
+		dot.TextSize = 10
+		row.badgeWrap.Add(container.NewCenter(dot))
+	}
+	row.badgeWrap.Refresh()
+
+	row.thumbWrap.Objects = nil
+	if thumbObj := createThumbnailObject(entry); thumbObj != nil {
+		row.thumbWrap.Add(container.NewCenter(thumbObj))
+		thumbSpacer := canvas.NewRectangle(color.Transparent)
+		thumbSpacer.SetMinSize(fyne.NewSize(8, 0))
+		row.thumbWrap.Add(thumbSpacer)
+	}
+	row.thumbWrap.Refresh()
+
+	if u.cursorIdx == row.idx {
+		row.bg.FillColor = config.ColorHover
+		row.ts.Importance = widget.MediumImportance
+		row.ind.SetColor(theme.Color(theme.ColorNamePrimary))
+	} else {
+		row.bg.FillColor = config.ColorDefault
+		row.ts.Importance = widget.LowImportance
+		row.ind.SetColor(color.Transparent)
+	}
+	row.bg.Refresh()
+	row.ts.Refresh()
+	row.Refresh()
 }
 
 // createThumbnailObject creates a Fyne CanvasObject preview for the entry
@@ -303,18 +339,51 @@ func createThumbnailObject(entry *Entry) fyne.CanvasObject {
 		return container.NewGridWrap(fyne.NewSize(64, 45), icon)
 	}
 	if entry.FilePath != "" {
-		ext := filepath.Ext(entry.FilePath)
-		if iconPath := getSystemMimeIcon(ext); iconPath != "" {
-			img := canvas.NewImageFromFile(iconPath)
-			img.FillMode = canvas.ImageFillContain
-			return container.NewGridWrap(fyne.NewSize(64, 45), img)
+		if paths := entry.FilePaths(); len(paths) > 1 {
+			return stackedFileIcons(paths)
 		}
-		uri := storage.NewFileURI(entry.FilePath)
-		fileIcon := widget.NewFileIcon(uri)
-		return container.NewGridWrap(fyne.NewSize(64, 45), fileIcon)
+		return container.NewGridWrap(fyne.NewSize(64, 45), fileThumbIcon(entry.FilePath))
 	}
 
 	return nil
+}
+
+// fileThumbIcon returns the best available icon for a single file: its
+// system mime icon if one is found, else Fyne's generic file icon.
+func fileThumbIcon(path string) fyne.CanvasObject {
+	if iconPath := getSystemMimeIcon(filepath.Ext(path)); iconPath != "" {
+		img := canvas.NewImageFromFile(iconPath)
+		img.FillMode = canvas.ImageFillContain
+		return img
+	}
+	return widget.NewFileIcon(storage.NewFileURI(path))
+}
+
+// stackedFileIcons renders up to 3 of the copied files' own icons in a
+// staggered stack, so a multi-file entry reads as "a pile of these files"
+// rather than a generic folder.
+func stackedFileIcons(paths []string) fyne.CanvasObject {
+	const iconSize float32 = 42
+	const step float32 = 5
+
+	n := min(len(paths), 3)
+
+	stack := container.NewWithoutLayout()
+	for i := n - 1; i >= 0; i-- { // back-to-front so paths[0] ends up on top
+		icon := fileThumbIcon(paths[i])
+		icon.Resize(fyne.NewSize(iconSize, iconSize))
+		icon.Move(fyne.NewPos(float32(i)*step, float32(i)*step))
+		stack.Add(icon)
+	}
+
+	// container.NewWithoutLayout reports MinSize as just its largest child
+	// (28x28), ignoring the offset stagger — wrapping it in a GridWrap cell
+	// forces the true bounding box (~44x44) so NewCenter positions it
+	// correctly instead of letting the back icons spill outside the row.
+	total := iconSize + float32(n-1)*step
+	fixed := container.NewGridWrap(fyne.NewSize(total, total), stack)
+
+	return container.NewGridWrap(fyne.NewSize(64, 45), container.NewCenter(fixed))
 }
 
 // moveCursor moves the highlighted row by delta (+1 down, -1 up).
@@ -335,34 +404,17 @@ func (u *UI) moveCursor(delta int) {
 }
 
 func (u *UI) setCursor(idx int) {
-	// Clear previous highlight.
-	if u.cursorIdx >= 0 && u.cursorIdx < len(u.itemBgs) {
-		u.itemBgs[u.cursorIdx].FillColor = config.ColorDefault
-		u.itemBgs[u.cursorIdx].Refresh()
-		u.itemTs[u.cursorIdx].Importance = widget.LowImportance
-		u.itemTs[u.cursorIdx].Refresh()
-		if u.cursorIdx < len(u.itemIndicators) {
-			u.itemIndicators[u.cursorIdx].SetColor(color.Transparent)
-		}
-	}
+	old := u.cursorIdx
 	u.cursorIdx = idx
-	// Set new highlight.
-	if u.cursorIdx >= 0 && u.cursorIdx < len(u.itemBgs) {
-		u.itemBgs[u.cursorIdx].FillColor = config.ColorHover
-		u.itemBgs[u.cursorIdx].Refresh()
-		u.itemTs[u.cursorIdx].Importance = widget.MediumImportance
-		u.itemTs[u.cursorIdx].Refresh()
-		if u.cursorIdx < len(u.itemIndicators) {
-			u.itemIndicators[u.cursorIdx].SetColor(theme.Color(theme.ColorNamePrimary))
-		}
 
-		// Scroll to keep cursor visible.
-		if idx < len(u.itemsBox.Objects) {
-			obj := u.itemsBox.Objects[idx]
-			pos := obj.Position()
-			u.scroll.Offset = fyne.NewPos(0, pos.Y)
-			u.scroll.Refresh()
-		}
+	// Refresh only rebinds visible rows, so this stays cheap regardless of
+	// how many entries are in history.
+	if old >= 0 && old < len(u.filtered) {
+		u.list.RefreshItem(old)
+	}
+	if idx >= 0 && idx < len(u.filtered) {
+		u.list.RefreshItem(idx)
+		u.list.ScrollTo(idx) // keeps cursor visible
 	}
 }
 
@@ -447,7 +499,19 @@ func (u *UI) applyFilter(query string) {
 		u.filtered = result
 	}
 	u.cursorIdx = -1
-	u.buildItems()
+	u.list.Refresh()
+}
+
+// buildURIList joins file paths into a text/uri-list body (CRLF-separated
+// file:// URIs), so copying a multi-file entry pastes back all the files.
+func buildURIList(paths []string) string {
+	var b strings.Builder
+	for _, p := range paths {
+		b.WriteString("file://")
+		b.WriteString(p)
+		b.WriteString("\r\n")
+	}
+	return b.String()
 }
 
 func writeToClipboard(e *Entry) error {
@@ -464,9 +528,12 @@ func writeToClipboard(e *Entry) error {
 	}
 
 	if e.FilePath != "" {
-		uri := "file://" + e.FilePath + "\r\n"
+		paths := e.FilePaths()
+		if len(paths) == 0 {
+			paths = []string{e.FilePath}
+		}
 		cmd := exec.Command(wlCopyCmd, "-t", "text/uri-list")
-		cmd.Stdin = strings.NewReader(uri)
+		cmd.Stdin = strings.NewReader(buildURIList(paths))
 		if err := cmd.Run(); err == nil {
 			return nil
 		}
@@ -656,6 +723,9 @@ func getEntryBadge(entry *Entry) fyne.CanvasObject {
 		return newBadge("VIDEO", config.CurrentTheme.GetColor("badge_video_bg"), config.CurrentTheme.GetColor("badge_video_fg"))
 	}
 	if entry.FilePath != "" {
+		if paths := entry.FilePaths(); len(paths) > 1 {
+			return newBadge(fmt.Sprintf("%d FILES", len(paths)), config.CurrentTheme.GetColor("badge_file_bg"), config.CurrentTheme.GetColor("badge_file_fg"))
+		}
 		ext := strings.ToUpper(strings.TrimPrefix(filepath.Ext(entry.FilePath), "."))
 		if ext == "" {
 			ext = "FILE"
@@ -702,9 +772,33 @@ func SingleLinePreview(content string) string {
 	return firstLine
 }
 
+var (
+	mimeIconCacheMu sync.RWMutex
+	mimeIconCache   = map[string]string{}
+)
+
+// getSystemMimeIcon is called on every render of every file-backed row, but
+// the on-disk icon theme doesn't change at runtime, so cache the lookup per extension.
 func getSystemMimeIcon(ext string) string {
 	ext = strings.ToLower(ext)
 
+	mimeIconCacheMu.RLock()
+	cached, ok := mimeIconCache[ext]
+	mimeIconCacheMu.RUnlock()
+	if ok {
+		return cached
+	}
+
+	path := lookupSystemMimeIcon(ext)
+
+	mimeIconCacheMu.Lock()
+	mimeIconCache[ext] = path
+	mimeIconCacheMu.Unlock()
+
+	return path
+}
+
+func lookupSystemMimeIcon(ext string) string {
 	var iconNames []string
 	switch ext {
 	case ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".rar", ".7z", ".pkg":

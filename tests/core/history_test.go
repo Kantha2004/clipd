@@ -173,6 +173,7 @@ func TestPersistence(t *testing.T) {
 	store1 := core.NewHistoryStore(time.Hour, 10)
 	store1.AddText("Persisted Text Item 1")
 	store1.AddText("Persisted Text Item 2")
+	store1.Flush()
 
 	// Verify they are saved
 	if _, err := os.Stat(historyFile); err != nil {
